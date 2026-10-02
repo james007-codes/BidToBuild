@@ -1,0 +1,89 @@
+PATIENT CARE SUMMARY
+Record ID: CF-2024-0417
+Facility: Northside General Hospital
+Prepared: 14 November 2024
+
+--------------------------------------------------------------------
+SECTION 1 - PATIENT BACKGROUND
+--------------------------------------------------------------------
+
+Patient is a 58-year-old male presenting with a three-week history of
+intermittent chest discomfort on exertion. He reports the discomfort
+resolves within five minutes of rest.
+
+Relevant history: type 2 diabetes (diagnosed 2016), hyperlipidaemia,
+and a 20 pack-year smoking history with cessation in 2019. No prior
+cardiac procedures. Family history is significant for myocardial
+infarction in his father at age 61.
+
+The patient is a resident of Pune and was travelling for work at the
+time of presentation.
+
+--------------------------------------------------------------------
+SECTION 2 - INITIAL ASSESSMENT (04 November 2024)
+--------------------------------------------------------------------
+
+On arrival, blood pressure was 148/92 mmHg with a regular pulse of
+78 beats per minute. The patient was afebrile and fully oriented.
+
+Laboratory findings:
+  - Fasting glucose        142 mg/dL
+  - HbA1c                  7.8 percent
+  - Total cholesterol      226 mg/dL
+  - LDL cholesterol        151 mg/dL
+  - Troponin I             below detection threshold
+
+A resting ECG showed normal sinus rhythm with no acute ST-segment
+changes. A transthoracic echocardiogram was performed and reported an
+ejection fraction of 52 percent with mild left ventricular hypertrophy.
+
+A CT coronary angiogram demonstrated a focal stenosis of the proximal
+left anterior descending artery measuring 65 percent luminal narrowing.
+A second, non-obstructive lesion of 30 percent was noted in the right
+coronary artery.
+
+--------------------------------------------------------------------
+SECTION 3 - INTERVENTION (09 November 2024)
+--------------------------------------------------------------------
+
+Following multidisciplinary review, the patient underwent invasive
+coronary angiography. Intravascular ultrasound of the proximal LAD
+lesion reclassified the stenosis at 78 percent, which is more severe
+than the estimate obtained by CT.
+
+A drug-eluting stent measuring 3.0 mm by 18 mm was deployed across the
+lesion. Post-deployment imaging confirmed full expansion with no
+residual stenosis and TIMI grade 3 flow. No periprocedural
+complications were recorded.
+
+The right coronary artery lesion was managed medically and no
+intervention was performed at that site.
+
+--------------------------------------------------------------------
+SECTION 4 - DISCHARGE (11 November 2024)
+--------------------------------------------------------------------
+
+The patient was discharged in stable condition on the following
+medications:
+
+  - Aspirin 75 mg once daily
+  - Ticagrelor 90 mg twice daily
+  - Atorvastatin 40 mg once daily
+  - Metformin 1000 mg twice daily
+  - Ramipril 5 mg once daily
+
+Dual antiplatelet therapy is to continue for twelve months. The
+patient was enrolled in a supervised cardiac rehabilitation programme
+commencing four weeks post-discharge.
+
+--------------------------------------------------------------------
+SECTION 5 - FOLLOW-UP PLAN
+--------------------------------------------------------------------
+
+Cardiology review is scheduled at six weeks. Repeat lipid profile and
+HbA1c are to be obtained at three months. The patient was counselled
+on the importance of medication adherence, particularly the
+antiplatelet regimen, and advised that premature discontinuation
+carries a risk of stent thrombosis.
+
+Reviewed and submitted by the attending cardiology team.

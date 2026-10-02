@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: #fafafa;
+    background-color: #09090b;
+  }
+
+  /* Faint dot grid + a violet glow at the top of the page */
+  body {
+    background-color: #09090b;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124, 108, 242, 0.16), transparent 70%),
+      radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+    background-size: 100% 100%, 22px 22px;
+    background-attachment: fixed;
+  }
+
+  /* Default border color for borders/dividers without an explicit color */
+  *, ::before, ::after {
+    border-color: #27272a;
+  }
+
+  ::selection {
+    background: rgba(124, 108, 242, 0.35);
+  }
+
+  /* Dark scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #27272a transparent;
+  }
+
+  select option {
+    background: #18181b;
+    color: #fafafa;
+  }
+}
+
+@layer components {
+  /* Card surface with a subtle top highlight */
+  .surface-card {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 40%), #111113;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+
+  .text-gradient {
+    background: linear-gradient(180deg, #ffffff 30%, #a1a1aa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .text-gradient-brand {
+    background: linear-gradient(90deg, #c4b8ff, #7c6cf2 60%, #5e8bff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .btn-glow {
+    box-shadow: 0 0 0 1px rgba(124, 108, 242, 0.5), 0 4px 20px -4px rgba(124, 108, 242, 0.6),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  .glass {
+    background: rgba(12, 12, 14, 0.72);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+  }
+
+  .page-enter {
+    animation: page-enter 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
+  }
+}

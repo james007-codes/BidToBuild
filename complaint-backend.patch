@@ -1,0 +1,1920 @@
+diff --git a/backend/.gitignore b/backend/.gitignore
+index ed5c595..f2c0175 100644
+--- a/backend/.gitignore
++++ b/backend/.gitignore
+@@ -13,4 +13,6 @@ pnpm-debug.log*
+ 
+ # OS files
+ .DS_Store
+-Thumbs.db
+\ No newline at end of file
++Thumbs.db
++# Uploaded complaint photos
++uploads/
+diff --git a/backend/COMPLAINTS_API.md b/backend/COMPLAINTS_API.md
+new file mode 100644
+index 0000000..2891de6
+--- /dev/null
++++ b/backend/COMPLAINTS_API.md
+@@ -0,0 +1,74 @@
++# Complaint Management API
++
++Base URL: `http://localhost:5000/api`. Every endpoint needs `Authorization: Bearer <token>`.
++All responses include `success: true|false`; errors also include `message`.
++Single source of truth for flairs, keywords and locations: `src/config/complaintConfig.json`
++(also served at `GET /complaints/config`).
++
++## Priority & recurrence rules
++- **Priority** = the higher of the flair's `defaultPriority` and the highest escalation keyword
++  found in title + description. Keywords only raise, never lower. The server always recomputes on create.
++- **prioritySource**: `flair` | `keyword` | `admin` (after an override).
++- **Recurring**: an earlier complaint exists with the same room + flair within `recurrenceWindowDays` (30).
++- **Workflow**: Reported → Assigned (via assign) → In Progress → Resolved (via resolve).
++
++## User (role "user")
++| Method | Path | Body | Returns |
++|---|---|---|---|
++| GET | /complaints/config | – | `{ config }` |
++| POST | /complaints/preview | JSON `{ flair, title, description, buildingId?, floorId?, roomId? }` | `{ priority, source, flairDefault, matchedKeywords, recurrencePreview: { isRecurring, count, windowDays } }` |
++| POST | /complaints | **multipart**: `flair, title, description, buildingId, floorId, roomId, spot?, reporterType? ("Student"/"Faculty")`, files `photos` (1–3, JPG/PNG/WEBP, ≤5 MB each) | `201 { complaint }` |
++| GET | /complaints/mine?status=&flair= | – | `{ complaints: Complaint[] }` |
++| GET | /complaints/:id | – | `{ complaint }` (owner only; `recurrence.history` is empty for users) |
++
++## Admin (role "admin")
++| Method | Path | Body | Returns |
++|---|---|---|---|
++| GET | /admin/complaints?status=&priority=&flair=&buildingId=&roomId=&roomType=&recurring=true&workerId=&search=&sort=priority\|newest\|oldest&page=1&limit=20 | – | `{ items: Complaint[], total, page, limit }`. Default sort: open first, then Critical→Low, then newest |
++| GET | /admin/complaints/:id | – | `{ complaint }` with full `recurrence.history` |
++| POST | /admin/complaints/:id/assign | `{ workerId }` | `{ complaint, warning: string\|null }` (warning when the worker has 5+ active tasks) |
++| POST | /admin/complaints/:id/updates | `{ status, comment }` | `{ complaint }`. Allowed: Assigned→In Progress, or the same status + comment (progress note) |
++| PATCH | /admin/complaints/:id/priority | `{ priority, reason }` | `{ complaint }` |
++| POST | /admin/complaints/:id/resolve | **multipart**: `note`, file `afterPhoto?` | `{ complaint }` (only from In Progress) |
++| GET | /admin/workers?flair= | – | `{ workers: Worker[] }`. With `flair`: only skilled workers, sorted by lowest load (for the assign dropdown) |
++| POST | /admin/workers | `{ name, phone?, skills: groupId[], status? }` | `201 { worker }` |
++| GET | /admin/stats?range=7d\|30d\|all | – | Stats (top-level keys below) |
++
++## Shapes
++```js
++Complaint {
++  id, ticketNo: "MT-1042", flair, flairGroup,
++  location: { buildingId, building, floorId, floor, roomId, roomName, roomType, spot },
++  title, description, photos: [{ url, name }],
++  priority, prioritySource, matchedKeywords: [], detectedPriority, priorityOverrideReason,
++  status, reportedBy: { id, name, email, type }, assignedWorker: { id, name } | null,
++  recurrence: { isRecurring, count, windowDays, history: [{ id, ticketNo, title, status, createdAt, resolvedAt }] },
++  updates: [{ id, status, comment, by, at }],
++  resolution: { note, afterPhoto: { url, name } | null, resolvedAt } | null,
++  createdAt, updatedAt
++}
++// In list endpoints, recurrence = { isRecurring, count, windowDays: null, history: [] } (snapshot at creation)
++
++Worker { id, name, phone, skills, status, activeCount, resolvedThisWeek,
++         byPriority: { Low, Medium, High, Critical }, overloaded }
++
++Stats {
++  range,
++  kpis: { total, open, criticalOpen, resolvedThisWeek, avgResolutionHours, recurringCount },
++  byStatus: [{ status, count }], byPriority: [{ priority, count }],
++  byFlair: [{ flair, label, color, count }], byFlairGroup: [{ group, label, count }],
++  byRoomType: [{ roomType, count }], byBuilding: [{ building, count, open, critical }],
++  topRooms: [{ roomId, roomName, roomType, building, count, open }],
++  roomFlairMatrix: [{ roomId, roomName, flair, label, count }],
++  hotspots: [{ roomId, roomName, roomType, building, flair, label, count }],
++  trend: [{ date: "YYYY-MM-DD", count }]
++}
++```
++
++## Demo data
++```bash
++# register one normal user in the app first, then:
++npm run seed            # or: node src/scripts/seed.js --reset
++```
++Creates 8 workers and ~40 complaints. LH-204 (B Block, 2nd Floor) already has 2 electrical hazard
++reports this month, so a new "switchboard sparking" report shows as Critical + 3rd recurrence.
+diff --git a/backend/package-lock.json b/backend/package-lock.json
+index d4ae3e9..24f3ed6 100644
+--- a/backend/package-lock.json
++++ b/backend/package-lock.json
+@@ -14,7 +14,8 @@
+         "dotenv": "^17.2.1",
+         "express": "^5.1.0",
+         "jsonwebtoken": "^9.0.2",
+-        "mongoose": "^8.18.0"
++        "mongoose": "^8.18.0",
++        "multer": "^2.4.0"
+       },
+       "devDependencies": {
+         "nodemon": "^3.1.10"
+@@ -71,6 +72,12 @@
+         "node": ">= 8"
+       }
+     },
++    "node_modules/append-field": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/append-field/-/append-field-1.0.0.tgz",
++      "integrity": "sha512-klpgFSWLW1ZEs8svjfb7g4qWY0YS5imI82dTg+QahUvJ8YqAY0P10Uk8tTyh9ZGuYEZEMaeJYCF5BFuX552hsw==",
++      "license": "MIT"
++    },
+     "node_modules/balanced-match": {
+       "version": "4.0.4",
+       "resolved": "https://registry.npmjs.org/balanced-match/-/balanced-match-4.0.4.tgz",
+@@ -181,6 +188,17 @@
+       "integrity": "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA==",
+       "license": "BSD-3-Clause"
+     },
++    "node_modules/busboy": {
++      "version": "1.6.0",
++      "resolved": "https://registry.npmjs.org/busboy/-/busboy-1.6.0.tgz",
++      "integrity": "sha512-8SFQbg/0hQ9xy3UNTB0YEnsNBbWfhf7RtnzpL7TkBiTBRfrQ9Fxcnz7VJsleJpyp6rVLvXiuORqjlHi5q+PYuA==",
++      "dependencies": {
++        "streamsearch": "^1.1.0"
++      },
++      "engines": {
++        "node": ">=10.16.0"
++      }
++    },
+     "node_modules/bytes": {
+       "version": "3.1.2",
+       "resolved": "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz",
+@@ -1027,6 +1045,67 @@
+       "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
+       "license": "MIT"
+     },
++    "node_modules/multer": {
++      "version": "2.4.0",
++      "resolved": "https://registry.npmjs.org/multer/-/multer-2.4.0.tgz",
++      "integrity": "sha512-7dqa0ZcFfzbefdTuIkzOSMvZWC0J7FLqBOjJUZvDCXShIURWKxAyTT1wHhnE5q19c7jOJf43IYYKjBmZVZmvhg==",
++      "license": "MIT",
++      "dependencies": {
++        "append-field": "^1.0.0",
++        "busboy": "^1.6.0",
++        "type-is": "^1.6.18"
++      },
++      "engines": {
++        "node": ">= 10.16.0"
++      },
++      "funding": {
++        "type": "opencollective",
++        "url": "https://opencollective.com/express"
++      }
++    },
++    "node_modules/multer/node_modules/media-typer": {
++      "version": "0.3.0",
++      "resolved": "https://registry.npmjs.org/media-typer/-/media-typer-0.3.0.tgz",
++      "integrity": "sha512-dq+qelQ9akHpcOl/gUVRTxVIOkAJ1wR3QAvb4RsVjS8oVoFjDGTc679wJYmUmknUF5HwMLOgb5O+a3KxfWapPQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/multer/node_modules/mime-db": {
++      "version": "1.52.0",
++      "resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.52.0.tgz",
++      "integrity": "sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/multer/node_modules/mime-types": {
++      "version": "2.1.35",
++      "resolved": "https://registry.npmjs.org/mime-types/-/mime-types-2.1.35.tgz",
++      "integrity": "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw==",
++      "license": "MIT",
++      "dependencies": {
++        "mime-db": "1.52.0"
++      },
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
++    "node_modules/multer/node_modules/type-is": {
++      "version": "1.6.18",
++      "resolved": "https://registry.npmjs.org/type-is/-/type-is-1.6.18.tgz",
++      "integrity": "sha512-TkRKr9sUTxEH8MdfuCSP7VizJyzRNMjj2J2do2Jr3Kym598JVdEksuzPQCnlFPW4ky9Q+iA+ma9BGm06XQBy8g==",
++      "license": "MIT",
++      "dependencies": {
++        "media-typer": "0.3.0",
++        "mime-types": "~2.1.24"
++      },
++      "engines": {
++        "node": ">= 0.6"
++      }
++    },
+     "node_modules/negotiator": {
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/negotiator/-/negotiator-1.1.0.tgz",
+@@ -1469,6 +1548,14 @@
+         "node": ">= 0.8"
+       }
+     },
++    "node_modules/streamsearch": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/streamsearch/-/streamsearch-1.1.0.tgz",
++      "integrity": "sha512-Mcc5wHehp9aXz1ax6bZUyY5afg9u2rv5cqQI3mRrYkGC8rW2hM02jWuwjtL++LS5qinSyhj2QfLyNsuc+VsExg==",
++      "engines": {
++        "node": ">=10.0.0"
++      }
++    },
+     "node_modules/supports-color": {
+       "version": "5.5.0",
+       "resolved": "https://registry.npmjs.org/supports-color/-/supports-color-5.5.0.tgz",
+diff --git a/backend/package.json b/backend/package.json
+index 968bcd3..64d1f18 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -6,7 +6,8 @@
+   "main": "src/server.js",
+   "scripts": {
+     "start": "node src/server.js",
+-    "dev": "nodemon src/server.js"
++    "dev": "nodemon src/server.js",
++    "seed": "node src/scripts/seed.js"
+   },
+   "keywords": [
+     "node",
+@@ -24,7 +25,8 @@
+     "dotenv": "^17.2.1",
+     "express": "^5.1.0",
+     "jsonwebtoken": "^9.0.2",
+-    "mongoose": "^8.18.0"
++    "mongoose": "^8.18.0",
++    "multer": "^2.4.0"
+   },
+   "devDependencies": {
+     "nodemon": "^3.1.10"
+diff --git a/backend/src/app.js b/backend/src/app.js
+index ead3530..a042937 100644
+--- a/backend/src/app.js
++++ b/backend/src/app.js
+@@ -6,6 +6,9 @@ import userRoutes from "./routes/userRoutes.js";
+ import adminRoutes from "./routes/adminRoutes.js";
+ import aiRoutes from "./routes/aiRoutes.js";
+ import conversationRoutes from "./routes/conversationRoutes.js";
++import complaintRoutes from "./routes/complaintRoutes.js";
++import adminComplaintRoutes from "./routes/adminComplaintRoutes.js";
++import { UPLOAD_DIR } from "./middleware/uploadMiddleware.js";
+ 
+ const app = express();
+ app.use(
+@@ -22,6 +25,11 @@ app.use("/api/users", userRoutes);
+ app.use("/api/admin", adminRoutes);
+ app.use("/api/ai", aiRoutes);
+ app.use("/api/conversations",conversationRoutes);
++app.use("/api/complaints", complaintRoutes);
++app.use("/api/admin", adminComplaintRoutes);
++
++// Uploaded complaint photos (served read-only)
++app.use("/uploads", express.static(UPLOAD_DIR, { index: false, dotfiles: "deny" }));
+ 
+ app.get("/", (req, res) => {
+     res.json({
+diff --git a/backend/src/config/complaintConfig.js b/backend/src/config/complaintConfig.js
+new file mode 100644
+index 0000000..320816f
+--- /dev/null
++++ b/backend/src/config/complaintConfig.js
+@@ -0,0 +1,36 @@
++import { readFileSync } from "fs";
++import { fileURLToPath } from "url";
++import path from "path";
++
++const __dirname = path.dirname(fileURLToPath(import.meta.url));
++
++// Single source of truth for flairs, keywords, locations and workflow.
++// The frontend should copy complaintConfig.json (or fetch GET /api/complaints/config).
++const config = JSON.parse(
++    readFileSync(path.join(__dirname, "complaintConfig.json"), "utf-8")
++);
++
++export const flairById = Object.fromEntries(config.flairs.map((f) => [f.id, f]));
++export const groupById = Object.fromEntries(config.flairGroups.map((g) => [g.id, g]));
++export const PRIORITY_RANK = Object.fromEntries(config.priorities.map((p, i) => [p, i]));
++
++// Resolve building/floor/room ids into names + room type. Returns null if invalid.
++export function resolveLocation(buildingId, floorId, roomId) {
++    const building = config.buildings.find((b) => b.id === buildingId);
++    const floor = building?.floors.find((f) => f.id === floorId);
++    const room = floor?.rooms.find((r) => r.id === roomId);
++
++    if (!building || !floor || !room) return null;
++
++    return {
++        buildingId: building.id,
++        building: building.name,
++        floorId: floor.id,
++        floor: floor.name,
++        roomId: room.id,
++        roomName: room.name,
++        roomType: room.roomType,
++    };
++}
++
++export default config;
+diff --git a/backend/src/config/complaintConfig.json b/backend/src/config/complaintConfig.json
+new file mode 100644
+index 0000000..f697738
+--- /dev/null
++++ b/backend/src/config/complaintConfig.json
+@@ -0,0 +1,143 @@
++{
++  "priorities": ["Low", "Medium", "High", "Critical"],
++  "statuses": ["Reported", "Assigned", "In Progress", "Resolved"],
++  "recurrenceWindowDays": 30,
++  "overloadThreshold": 5,
++
++  "flairGroups": [
++    { "id": "electrical-safety", "label": "Electrical & Safety" },
++    { "id": "classroom", "label": "Classroom Resources" },
++    { "id": "labs-it", "label": "Labs & IT" },
++    { "id": "water-washroom", "label": "Water & Washroom" },
++    { "id": "canteen", "label": "Canteen" },
++    { "id": "campus", "label": "Campus" }
++  ],
++
++  "flairs": [
++    { "id": "electrical-hazard", "label": "Electrical Hazard", "group": "electrical-safety", "icon": "Zap", "color": "#DC2626", "defaultPriority": "Critical" },
++    { "id": "fire-safety", "label": "Fire Safety", "group": "electrical-safety", "icon": "Flame", "color": "#EA580C", "defaultPriority": "Critical" },
++    { "id": "power-outage", "label": "Power Outage", "group": "electrical-safety", "icon": "PlugZap", "color": "#D97706", "defaultPriority": "High" },
++    { "id": "lights", "label": "Lights Not Working", "group": "electrical-safety", "icon": "Lightbulb", "color": "#CA8A04", "defaultPriority": "Low" },
++
++    { "id": "fan", "label": "Fan Not Working", "group": "classroom", "icon": "Fan", "color": "#0891B2", "defaultPriority": "Medium" },
++    { "id": "ac", "label": "AC Not Working", "group": "classroom", "icon": "AirVent", "color": "#0284C7", "defaultPriority": "Medium" },
++    { "id": "projector", "label": "Projector Issue", "group": "classroom", "icon": "Projector", "color": "#4F46E5", "defaultPriority": "Medium" },
++    { "id": "smart-board", "label": "Smart Board Not Working", "group": "classroom", "icon": "Presentation", "color": "#7C3AED", "defaultPriority": "Medium" },
++    { "id": "furniture", "label": "Broken Bench / Chair", "group": "classroom", "icon": "Armchair", "color": "#A16207", "defaultPriority": "Low" },
++
++    { "id": "computer", "label": "Computer / Lab PC Issue", "group": "labs-it", "icon": "Monitor", "color": "#2563EB", "defaultPriority": "Medium" },
++    { "id": "network", "label": "Wi-Fi & Network", "group": "labs-it", "icon": "Wifi", "color": "#0D9488", "defaultPriority": "Medium" },
++    { "id": "lab-equipment", "label": "Lab Equipment Fault", "group": "labs-it", "icon": "FlaskConical", "color": "#9333EA", "defaultPriority": "Medium" },
++
++    { "id": "water-filter", "label": "Water Filter / Drinking Water", "group": "water-washroom", "icon": "GlassWater", "color": "#0EA5E9", "defaultPriority": "High" },
++    { "id": "plumbing", "label": "Plumbing / Tap Leak", "group": "water-washroom", "icon": "Droplets", "color": "#3B82F6", "defaultPriority": "Medium" },
++    { "id": "washroom-hygiene", "label": "Washroom Hygiene", "group": "water-washroom", "icon": "Bath", "color": "#14B8A6", "defaultPriority": "Medium" },
++
++    { "id": "canteen-hygiene", "label": "Canteen Hygiene", "group": "canteen", "icon": "Bug", "color": "#E11D48", "defaultPriority": "High" },
++    { "id": "canteen-food", "label": "Canteen Food Quality", "group": "canteen", "icon": "UtensilsCrossed", "color": "#F59E0B", "defaultPriority": "Medium" },
++    { "id": "canteen-equipment", "label": "Canteen Equipment", "group": "canteen", "icon": "CookingPot", "color": "#B45309", "defaultPriority": "Low" },
++
++    { "id": "lift", "label": "Lift Not Working", "group": "campus", "icon": "ArrowUpDown", "color": "#DB2777", "defaultPriority": "High" },
++    { "id": "structural", "label": "Structural Damage", "group": "campus", "icon": "Construction", "color": "#B91C1C", "defaultPriority": "High" },
++    { "id": "cleanliness", "label": "Cleanliness / Housekeeping", "group": "campus", "icon": "Sparkles", "color": "#65A30D", "defaultPriority": "Low" },
++    { "id": "other", "label": "Other", "group": "campus", "icon": "CircleHelp", "color": "#64748B", "defaultPriority": "Low" }
++  ],
++
++  "escalationKeywords": {
++    "Critical": [
++      "sparking", "spark", "sparks", "exposed wire", "exposed wires", "exposed wiring",
++      "short circuit", "shock", "electric shock", "smoke", "smoking", "fire", "burning smell",
++      "burning", "gas leak", "flooding", "flooded", "ceiling fell", "collapse", "collapsed"
++    ],
++    "High": [
++      "heavy leak", "leaking heavily", "no power", "power cut", "broken glass", "stuck",
++      "no water", "dirty water", "contaminated", "food poisoning", "insect", "insects",
++      "cockroach", "cockroaches", "rat", "rats", "vomiting"
++    ]
++  },
++
++  "roomTypes": [
++    "Lecture Hall", "Computer Lab", "Electronics Lab", "Seminar Hall", "Library", "Canteen",
++    "Washroom", "Staff Room", "Auditorium", "Corridor", "Common Area", "Hostel"
++  ],
++
++  "buildings": [
++    {
++      "id": "a-block", "name": "A Block",
++      "floors": [
++        { "id": "a-0", "name": "Ground Floor", "rooms": [
++          { "id": "a-0-lobby", "name": "A Block Lobby", "roomType": "Common Area" },
++          { "id": "a-0-wr", "name": "Ground Floor Washroom (A)", "roomType": "Washroom" }
++        ]},
++        { "id": "a-1", "name": "1st Floor", "rooms": [
++          { "id": "lh-101", "name": "LH-101", "roomType": "Lecture Hall" },
++          { "id": "lh-102", "name": "LH-102", "roomType": "Lecture Hall" },
++          { "id": "a-1-wr", "name": "1st Floor Washroom (A)", "roomType": "Washroom" },
++          { "id": "a-1-staff", "name": "Staff Room A1", "roomType": "Staff Room" }
++        ]},
++        { "id": "a-2", "name": "2nd Floor", "rooms": [
++          { "id": "lh-201", "name": "LH-201", "roomType": "Lecture Hall" },
++          { "id": "a-2-corridor", "name": "2nd Floor Corridor (A)", "roomType": "Corridor" }
++        ]}
++      ]
++    },
++    {
++      "id": "b-block", "name": "B Block",
++      "floors": [
++        { "id": "b-1", "name": "1st Floor", "rooms": [
++          { "id": "cl-1", "name": "Computer Lab 1", "roomType": "Computer Lab" },
++          { "id": "el-1", "name": "Electronics Lab 1", "roomType": "Electronics Lab" }
++        ]},
++        { "id": "b-2", "name": "2nd Floor", "rooms": [
++          { "id": "lh-204", "name": "LH-204", "roomType": "Lecture Hall" },
++          { "id": "lh-205", "name": "LH-205", "roomType": "Lecture Hall" },
++          { "id": "b-2-wr", "name": "2nd Floor Washroom (B)", "roomType": "Washroom" }
++        ]},
++        { "id": "b-3", "name": "3rd Floor", "rooms": [
++          { "id": "cl-3", "name": "Computer Lab 3", "roomType": "Computer Lab" },
++          { "id": "lh-301", "name": "LH-301", "roomType": "Lecture Hall" }
++        ]}
++      ]
++    },
++    {
++      "id": "c-block", "name": "C Block",
++      "floors": [
++        { "id": "c-1", "name": "1st Floor", "rooms": [
++          { "id": "seminar-1", "name": "Seminar Hall", "roomType": "Seminar Hall" },
++          { "id": "c-1-staff", "name": "Staff Room C1", "roomType": "Staff Room" }
++        ]},
++        { "id": "c-2", "name": "2nd Floor", "rooms": [
++          { "id": "lh-401", "name": "LH-401", "roomType": "Lecture Hall" },
++          { "id": "c-2-wr", "name": "2nd Floor Washroom (C)", "roomType": "Washroom" }
++        ]}
++      ]
++    },
++    {
++      "id": "library", "name": "Library Building",
++      "floors": [
++        { "id": "lib-0", "name": "Ground Floor", "rooms": [
++          { "id": "lib-reading", "name": "Reading Hall", "roomType": "Library" },
++          { "id": "lib-digital", "name": "Digital Library", "roomType": "Computer Lab" }
++        ]}
++      ]
++    },
++    {
++      "id": "canteen-block", "name": "Canteen Block",
++      "floors": [
++        { "id": "cb-0", "name": "Ground Floor", "rooms": [
++          { "id": "main-canteen", "name": "Main Canteen", "roomType": "Canteen" },
++          { "id": "canteen-kitchen", "name": "Canteen Kitchen", "roomType": "Canteen" },
++          { "id": "cb-water", "name": "Canteen Water Point", "roomType": "Common Area" }
++        ]}
++      ]
++    },
++    {
++      "id": "auditorium", "name": "Auditorium",
++      "floors": [
++        { "id": "aud-0", "name": "Ground Floor", "rooms": [
++          { "id": "main-aud", "name": "Main Auditorium", "roomType": "Auditorium" }
++        ]}
++      ]
++    }
++  ]
++}
+diff --git a/backend/src/controllers/adminComplaintController.js b/backend/src/controllers/adminComplaintController.js
+new file mode 100644
+index 0000000..7d79db7
+--- /dev/null
++++ b/backend/src/controllers/adminComplaintController.js
+@@ -0,0 +1,403 @@
++import mongoose from "mongoose";
++
++import Complaint from "../models/Complaint.js";
++import Worker from "../models/Worker.js";
++import config, { flairById } from "../config/complaintConfig.js";
++import { findRecurrence } from "../utils/recurrence.js";
++import { serializeComplaint } from "../utils/serializeComplaint.js";
++import { buildStats } from "../utils/complaintStats.js";
++import { fileUrl, cleanupFiles } from "../middleware/uploadMiddleware.js";
++
++const POPULATE = [
++    { path: "reportedBy", select: "name email" },
++    { path: "assignedWorker", select: "name" },
++];
++
++const OPEN_STATUSES = ["Assigned", "In Progress"];
++const DAY_MS = 24 * 60 * 60 * 1000;
++
++const bad = (res, message, status = 400) => res.status(status).json({ success: false, message });
++const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
++
++async function loadComplaint(id) {
++    if (!mongoose.isValidObjectId(id)) return null;
++    return Complaint.findById(id);
++}
++
++async function respondWithDetail(res, complaint, extra = {}) {
++    await complaint.populate(POPULATE);
++    const recurrence = await findRecurrence({
++        roomId: complaint.location.roomId,
++        flair: complaint.flair,
++        before: complaint.createdAt,
++        excludeId: complaint._id,
++    });
++    return res.json({ success: true, complaint: serializeComplaint(complaint, recurrence), ...extra });
++}
++
++/* =========================
++   GET /api/admin/complaints
++   ?status=&priority=&flair=&buildingId=&roomId=&roomType=&recurring=true&search=&sort=priority|newest|oldest&page=1&limit=20
++   Default sort: open first, then Critical → Low, then newest
++========================= */
++export async function listComplaints(req, res) {
++    try {
++        const q = req.query;
++        const match = {};
++
++        if (config.statuses.includes(q.status)) match.status = q.status;
++        if (config.priorities.includes(q.priority)) match.priority = q.priority;
++        if (flairById[q.flair]) match.flair = q.flair;
++        if (typeof q.buildingId === "string" && q.buildingId) match["location.buildingId"] = q.buildingId;
++        if (typeof q.roomId === "string" && q.roomId) match["location.roomId"] = q.roomId;
++        if (config.roomTypes.includes(q.roomType)) match["location.roomType"] = q.roomType;
++        if (q.recurring === "true") match.isRecurring = true;
++        if (mongoose.isValidObjectId(q.workerId)) match.assignedWorker = new mongoose.Types.ObjectId(q.workerId);
++
++        if (typeof q.search === "string" && q.search.trim()) {
++            const rx = new RegExp(escapeRegex(q.search.trim().slice(0, 100)), "i");
++            match.$or = [{ ticketNo: rx }, { title: rx }, { description: rx }, { "location.roomName": rx }];
++        }
++
++        const page = Math.max(1, parseInt(q.page) || 1);
++        const limit = Math.min(100, Math.max(1, parseInt(q.limit) || 20));
++
++        const sortStage =
++            q.sort === "newest" ? { createdAt: -1 }
++            : q.sort === "oldest" ? { createdAt: 1 }
++            : { isResolved: 1, priorityRank: -1, createdAt: -1 };
++
++        const [result] = await Complaint.aggregate([
++            { $match: match },
++            {
++                $addFields: {
++                    priorityRank: { $indexOfArray: [config.priorities, "$priority"] },
++                    isResolved: { $cond: [{ $eq: ["$status", "Resolved"] }, 1, 0] },
++                },
++            },
++            { $sort: sortStage },
++            {
++                $facet: {
++                    items: [{ $skip: (page - 1) * limit }, { $limit: limit }],
++                    total: [{ $count: "count" }],
++                },
++            },
++        ]);
++
++        const items = await Complaint.populate(result.items, POPULATE);
++
++        return res.json({
++            success: true,
++            items: items.map((c) => serializeComplaint(c)),
++            total: result.total[0]?.count ?? 0,
++            page,
++            limit,
++        });
++    } catch (error) {
++        console.error("List complaints error:", error);
++        return bad(res, "Failed to load complaints", 500);
++    }
++}
++
++/* =========================
++   GET /api/admin/complaints/:id   (full detail + live recurrence history)
++========================= */
++export async function getComplaintDetail(req, res) {
++    try {
++        const complaint = await loadComplaint(req.params.id);
++        if (!complaint) return bad(res, "Complaint not found", 404);
++        return respondWithDetail(res, complaint);
++    } catch (error) {
++        console.error("Complaint detail error:", error);
++        return bad(res, "Failed to load complaint", 500);
++    }
++}
++
++/* =========================
++   POST /api/admin/complaints/:id/assign   { workerId }
++   Reported → Assigned. Reassigning keeps the current status.
++   Assigning an overloaded worker is allowed but returns a warning.
++========================= */
++export async function assignWorker(req, res) {
++    try {
++        const { workerId } = req.body;
++
++        const complaint = await loadComplaint(req.params.id);
++        if (!complaint) return bad(res, "Complaint not found", 404);
++        if (complaint.status === "Resolved") return bad(res, "Resolved complaints cannot be reassigned");
++
++        if (!mongoose.isValidObjectId(workerId)) return bad(res, "A valid workerId is required");
++        const worker = await Worker.findById(workerId);
++        if (!worker) return bad(res, "Worker not found", 404);
++        if (worker.status === "Off Duty") return bad(res, `${worker.name} is off duty`);
++
++        if (complaint.assignedWorker?.equals(worker._id)) {
++            return bad(res, `Already assigned to ${worker.name}`);
++        }
++
++        const activeCount = await Complaint.countDocuments({
++            assignedWorker: worker._id,
++            status: { $in: OPEN_STATUSES },
++        });
++
++        const isReassign = !!complaint.assignedWorker;
++        complaint.assignedWorker = worker._id;
++        if (complaint.status === "Reported") complaint.status = "Assigned";
++
++        complaint.updates.push({
++            status: complaint.status,
++            comment: isReassign ? `Reassigned to ${worker.name}.` : `Assigned to ${worker.name}.`,
++            by: req.account.name,
++        });
++
++        await complaint.save();
++
++        const warning =
++            activeCount >= config.overloadThreshold
++                ? `${worker.name} already has ${activeCount} active tasks.`
++                : null;
++
++        return respondWithDetail(res, complaint, { warning });
++    } catch (error) {
++        console.error("Assign worker error:", error);
++        return bad(res, "Failed to assign worker", 500);
++    }
++}
++
++/* =========================
++   POST /api/admin/complaints/:id/updates   { status, comment }
++   - Assigned → In Progress
++   - Same status + comment = progress note visible to the user
++   Reported → Assigned happens via /assign, → Resolved via /resolve
++========================= */
++export async function addStatusUpdate(req, res) {
++    try {
++        const { status, comment = "" } = req.body;
++        const text = typeof comment === "string" ? comment.trim() : "";
++
++        const complaint = await loadComplaint(req.params.id);
++        if (!complaint) return bad(res, "Complaint not found", 404);
++
++        if (!config.statuses.includes(status)) return bad(res, "Invalid status");
++
++        if (status === complaint.status) {
++            if (!text) return bad(res, "Add a comment to post an update without changing status");
++            if (status === "Resolved") return bad(res, "Complaint is already resolved");
++        } else if (status === "Assigned") {
++            return bad(res, "Assign a worker to move a complaint to Assigned");
++        } else if (status === "Resolved") {
++            return bad(res, "Use the resolve action to resolve a complaint");
++        } else if (status === "In Progress" && complaint.status !== "Assigned") {
++            return bad(res, `Cannot move from ${complaint.status} to In Progress`);
++        } else if (status === "Reported") {
++            return bad(res, "Cannot move a complaint back to Reported");
++        }
++
++        complaint.status = status;
++        complaint.updates.push({
++            status,
++            comment: text || `Status changed to ${status}.`,
++            by: req.account.name,
++        });
++
++        await complaint.save();
++        return respondWithDetail(res, complaint);
++    } catch (error) {
++        console.error("Status update error:", error);
++        return bad(res, "Failed to update status", 500);
++    }
++}
++
++/* =========================
++   PATCH /api/admin/complaints/:id/priority   { priority, reason }
++========================= */
++export async function overridePriority(req, res) {
++    try {
++        const { priority, reason } = req.body;
++        const text = typeof reason === "string" ? reason.trim() : "";
++
++        const complaint = await loadComplaint(req.params.id);
++        if (!complaint) return bad(res, "Complaint not found", 404);
++
++        if (!config.priorities.includes(priority)) return bad(res, "Invalid priority");
++        if (!text) return bad(res, "A reason is required to override priority");
++        if (priority === complaint.priority) return bad(res, `Priority is already ${priority}`);
++
++        const previous = complaint.priority;
++        complaint.priority = priority;
++        complaint.prioritySource = "admin";
++        complaint.priorityOverrideReason = text;
++        complaint.updates.push({
++            status: complaint.status,
++            comment: `Priority changed from ${previous} to ${priority}: ${text}`,
++            by: req.account.name,
++        });
++
++        await complaint.save();
++        return respondWithDetail(res, complaint);
++    } catch (error) {
++        console.error("Override priority error:", error);
++        return bad(res, "Failed to update priority", 500);
++    }
++}
++
++/* =========================
++   POST /api/admin/complaints/:id/resolve   (multipart: note, afterPhoto?)
++   In Progress → Resolved
++========================= */
++export async function resolveComplaint(req, res) {
++    const files = req.file ? [req.file] : [];
++
++    try {
++        const note = typeof req.body.note === "string" ? req.body.note.trim() : "";
++
++        const complaint = await loadComplaint(req.params.id);
++        if (!complaint) {
++            cleanupFiles(files);
++            return bad(res, "Complaint not found", 404);
++        }
++        if (complaint.status !== "In Progress") {
++            cleanupFiles(files);
++            return bad(res, `Only In Progress complaints can be resolved (current: ${complaint.status})`);
++        }
++        if (!note) {
++            cleanupFiles(files);
++            return bad(res, "A resolution note is required");
++        }
++
++        const resolvedAt = new Date();
++        complaint.status = "Resolved";
++        complaint.resolution = {
++            note,
++            afterPhoto: req.file ? { url: fileUrl(req, req.file), name: req.file.originalname } : null,
++            resolvedAt,
++        };
++        complaint.updates.push({ status: "Resolved", comment: note, by: req.account.name, at: resolvedAt });
++
++        await complaint.save();
++        return respondWithDetail(res, complaint);
++    } catch (error) {
++        cleanupFiles(files);
++        console.error("Resolve complaint error:", error);
++        return bad(res, "Failed to resolve complaint", 500);
++    }
++}
++
++/* =========================
++   GET /api/admin/workers?flair=
++   With ?flair, only workers skilled for that flair's group, sorted by lowest load
++   (use this for the assign dropdown).
++========================= */
++export async function listWorkers(req, res) {
++    try {
++        const filter = {};
++        const flair = flairById[req.query.flair];
++        if (flair) filter.skills = flair.group;
++
++        const workers = await Worker.find(filter).lean();
++        const weekAgo = new Date(Date.now() - 7 * DAY_MS);
++
++        const loads = await Complaint.aggregate([
++            { $match: { assignedWorker: { $in: workers.map((w) => w._id) } } },
++            {
++                $group: {
++                    _id: "$assignedWorker",
++                    activeCount: { $sum: { $cond: [{ $in: ["$status", OPEN_STATUSES] }, 1, 0] } },
++                    resolvedThisWeek: {
++                        $sum: {
++                            $cond: [
++                                { $and: [{ $eq: ["$status", "Resolved"] }, { $gte: ["$resolution.resolvedAt", weekAgo] }] },
++                                1,
++                                0,
++                            ],
++                        },
++                    },
++                    critical: { $sum: { $cond: [{ $and: [{ $in: ["$status", OPEN_STATUSES] }, { $eq: ["$priority", "Critical"] }] }, 1, 0] } },
++                    high: { $sum: { $cond: [{ $and: [{ $in: ["$status", OPEN_STATUSES] }, { $eq: ["$priority", "High"] }] }, 1, 0] } },
++                    medium: { $sum: { $cond: [{ $and: [{ $in: ["$status", OPEN_STATUSES] }, { $eq: ["$priority", "Medium"] }] }, 1, 0] } },
++                    low: { $sum: { $cond: [{ $and: [{ $in: ["$status", OPEN_STATUSES] }, { $eq: ["$priority", "Low"] }] }, 1, 0] } },
++                },
++            },
++        ]);
++        const loadById = new Map(loads.map((l) => [l._id.toString(), l]));
++
++        const result = workers
++            .map((w) => {
++                const l = loadById.get(w._id.toString());
++                const activeCount = l?.activeCount ?? 0;
++                return {
++                    id: w._id.toString(),
++                    name: w.name,
++                    phone: w.phone,
++                    skills: w.skills,
++                    status: w.status,
++                    activeCount,
++                    resolvedThisWeek: l?.resolvedThisWeek ?? 0,
++                    byPriority: {
++                        Low: l?.low ?? 0,
++                        Medium: l?.medium ?? 0,
++                        High: l?.high ?? 0,
++                        Critical: l?.critical ?? 0,
++                    },
++                    overloaded: activeCount >= config.overloadThreshold,
++                };
++            })
++            .sort((a, b) => {
++                const offA = a.status === "Off Duty" ? 1 : 0;
++                const offB = b.status === "Off Duty" ? 1 : 0;
++                return offA - offB || a.activeCount - b.activeCount;
++            });
++
++        return res.json({ success: true, workers: result });
++    } catch (error) {
++        console.error("List workers error:", error);
++        return bad(res, "Failed to load workers", 500);
++    }
++}
++
++/* =========================
++   POST /api/admin/workers   { name, phone?, skills: groupId[], status? }
++========================= */
++export async function createWorker(req, res) {
++    try {
++        const { name, phone = "", skills = [], status } = req.body;
++        if (!name?.trim()) return bad(res, "Worker name is required");
++
++        const validGroups = config.flairGroups.map((g) => g.id);
++        const cleanSkills = Array.isArray(skills) ? skills.filter((s) => validGroups.includes(s)) : [];
++
++        const worker = await Worker.create({
++            name: name.trim(),
++            phone,
++            skills: cleanSkills,
++            ...(["Available", "Busy", "Off Duty"].includes(status) && { status }),
++        });
++
++        return res.status(201).json({
++            success: true,
++            worker: { id: worker._id.toString(), name: worker.name, phone: worker.phone, skills: worker.skills, status: worker.status },
++        });
++    } catch (error) {
++        console.error("Create worker error:", error);
++        return bad(res, "Failed to create worker", 500);
++    }
++}
++
++/* =========================
++   GET /api/admin/stats?range=7d|30d|all
++========================= */
++export async function getStats(req, res) {
++    try {
++        const days = { "7d": 7, "30d": 30 }[req.query.range];
++        const filter = days ? { createdAt: { $gte: new Date(Date.now() - days * DAY_MS) } } : {};
++
++        const complaints = await Complaint.find(filter)
++            .select("flair flairGroup location priority status isRecurring createdAt resolution.resolvedAt")
++            .lean();
++
++        return res.json({ success: true, range: days ? req.query.range : "all", ...buildStats(complaints) });
++    } catch (error) {
++        console.error("Stats error:", error);
++        return bad(res, "Failed to load stats", 500);
++    }
++}
+diff --git a/backend/src/controllers/complaintController.js b/backend/src/controllers/complaintController.js
+new file mode 100644
+index 0000000..8cd99a7
+--- /dev/null
++++ b/backend/src/controllers/complaintController.js
+@@ -0,0 +1,190 @@
++import mongoose from "mongoose";
++
++import Complaint from "../models/Complaint.js";
++import { nextSequence } from "../models/Counter.js";
++import config, { flairById, resolveLocation } from "../config/complaintConfig.js";
++import { detectPriority } from "../utils/priority.js";
++import { findRecurrence } from "../utils/recurrence.js";
++import { serializeComplaint } from "../utils/serializeComplaint.js";
++import { fileUrl, cleanupFiles } from "../middleware/uploadMiddleware.js";
++
++const POPULATE = [
++    { path: "reportedBy", select: "name email" },
++    { path: "assignedWorker", select: "name" },
++];
++
++const bad = (res, message, status = 400) => res.status(status).json({ success: false, message });
++
++/* =========================
++   GET /api/complaints/config
++   Flairs, keywords, locations — lets the frontend stay in sync with the server
++========================= */
++export function getComplaintConfig(req, res) {
++    res.json({ success: true, config });
++}
++
++/* =========================
++   POST /api/complaints/preview
++   Live priority + recurrence preview while the user types (nothing is saved)
++========================= */
++export async function previewPriority(req, res) {
++    const { flair, title = "", description = "", buildingId, floorId, roomId } = req.body;
++
++    const result = detectPriority(flair, title, description);
++    if (!result) return bad(res, "A valid flair is required");
++
++    let recurrencePreview = { isRecurring: false, count: 0, windowDays: config.recurrenceWindowDays };
++
++    const location = resolveLocation(buildingId, floorId, roomId);
++    if (location) {
++        const r = await findRecurrence({ roomId: location.roomId, flair });
++        recurrencePreview = { isRecurring: r.isRecurring, count: r.count, windowDays: r.windowDays };
++    }
++
++    res.json({
++        success: true,
++        priority: result.priority,
++        source: result.source,
++        flairDefault: result.flairDefault,
++        matchedKeywords: result.matchedKeywords,
++        recurrencePreview,
++    });
++}
++
++/* =========================
++   POST /api/complaints   (multipart/form-data)
++   fields: flair, title, description, buildingId, floorId, roomId, spot?, reporterType?
++   files:  photos (1–3 images)
++========================= */
++export async function createComplaint(req, res) {
++    const files = req.files || [];
++
++    try {
++        if (req.role !== "user") {
++            cleanupFiles(files);
++            return bad(res, "Only students/faculty accounts can report issues", 403);
++        }
++
++        const { flair, title, description, buildingId, floorId, roomId, spot, reporterType } = req.body;
++
++        const errors = [];
++        if (!flairById[flair]) errors.push("A valid flair is required");
++        if (!title?.trim()) errors.push("Title is required");
++        if (!description?.trim()) errors.push("Description is required");
++        if (!files.length) errors.push("At least one photo is required");
++
++        const location = resolveLocation(buildingId, floorId, roomId);
++        if (!location) errors.push("A valid building, floor and room are required");
++
++        if (errors.length) {
++            cleanupFiles(files);
++            return res.status(400).json({ success: false, message: errors[0], errors });
++        }
++
++        // Server ALWAYS recomputes priority — the preview shown in the browser is never trusted
++        const detected = detectPriority(flair, title, description);
++        const recurrence = await findRecurrence({ roomId: location.roomId, flair });
++
++        const seq = await nextSequence("complaint");
++
++        const complaint = await Complaint.create({
++            ticketNo: `MT-${seq}`,
++            flair,
++            flairGroup: flairById[flair].group,
++            location: { ...location, spot: spot?.trim() || null },
++            title: title.trim(),
++            description: description.trim(),
++            photos: files.map((f) => ({ url: fileUrl(req, f), name: f.originalname })),
++            priority: detected.priority,
++            prioritySource: detected.source,
++            detectedPriority: detected.priority,
++            matchedKeywords: detected.matchedKeywords,
++            status: "Reported",
++            reportedBy: req.account._id,
++            reporterType: reporterType === "Faculty" ? "Faculty" : "Student",
++            isRecurring: recurrence.isRecurring,
++            recurrenceCount: recurrence.count,
++            updates: [
++                {
++                    status: "Reported",
++                    comment:
++                        detected.source === "keyword"
++                            ? `Complaint submitted. Priority raised to ${detected.priority} (matched: ${detected.matchedKeywords.join(", ")}).`
++                            : "Complaint submitted.",
++                    by: "System",
++                },
++            ],
++        });
++
++        await complaint.populate(POPULATE);
++
++        return res.status(201).json({
++            success: true,
++            complaint: serializeComplaint(complaint, {
++                isRecurring: recurrence.isRecurring,
++                count: recurrence.count,
++                windowDays: recurrence.windowDays,
++                history: [],
++            }),
++        });
++    } catch (error) {
++        cleanupFiles(files);
++        console.error("Create complaint error:", error);
++        return bad(res, "Failed to create complaint", 500);
++    }
++}
++
++/* =========================
++   GET /api/complaints/mine?status=&flair=
++========================= */
++export async function getMyComplaints(req, res) {
++    try {
++        const filter = { reportedBy: req.account._id };
++
++        if (config.statuses.includes(req.query.status)) filter.status = req.query.status;
++        if (flairById[req.query.flair]) filter.flair = req.query.flair;
++
++        const complaints = await Complaint.find(filter).sort({ createdAt: -1 }).populate(POPULATE);
++
++        return res.json({ success: true, complaints: complaints.map((c) => serializeComplaint(c)) });
++    } catch (error) {
++        console.error("Get my complaints error:", error);
++        return bad(res, "Failed to load complaints", 500);
++    }
++}
++
++/* =========================
++   GET /api/complaints/:id
++   Owner only (admins use /api/admin/complaints/:id).
++   Returns 404 (not 403) for other users' complaints so ids can't be probed.
++========================= */
++export async function getMyComplaint(req, res) {
++    try {
++        const { id } = req.params;
++        if (!mongoose.isValidObjectId(id)) return bad(res, "Complaint not found", 404);
++
++        const complaint = await Complaint.findOne({ _id: id, reportedBy: req.account._id }).populate(POPULATE);
++        if (!complaint) return bad(res, "Complaint not found", 404);
++
++        // Users see the recurrence count, but not other people's complaint details
++        const r = await findRecurrence({
++            roomId: complaint.location.roomId,
++            flair: complaint.flair,
++            before: complaint.createdAt,
++            excludeId: complaint._id,
++        });
++
++        return res.json({
++            success: true,
++            complaint: serializeComplaint(complaint, {
++                isRecurring: r.isRecurring,
++                count: r.count,
++                windowDays: r.windowDays,
++                history: [],
++            }),
++        });
++    } catch (error) {
++        console.error("Get complaint error:", error);
++        return bad(res, "Failed to load complaint", 500);
++    }
++}
+diff --git a/backend/src/middleware/uploadMiddleware.js b/backend/src/middleware/uploadMiddleware.js
+new file mode 100644
+index 0000000..8a64c45
+--- /dev/null
++++ b/backend/src/middleware/uploadMiddleware.js
+@@ -0,0 +1,60 @@
++import multer from "multer";
++import crypto from "crypto";
++import fs from "fs";
++import path from "path";
++
++export const UPLOAD_DIR = path.resolve("uploads");
++fs.mkdirSync(UPLOAD_DIR, { recursive: true });
++
++const ALLOWED = {
++    "image/jpeg": ".jpg",
++    "image/png": ".png",
++    "image/webp": ".webp",
++};
++
++const storage = multer.diskStorage({
++    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
++    // Random name + extension derived from MIME type (never from the user's filename)
++    filename: (req, file, cb) =>
++        cb(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ALLOWED[file.mimetype]}`),
++});
++
++const imageUpload = multer({
++    storage,
++    limits: { fileSize: 5 * 1024 * 1024, files: 3 },
++    fileFilter: (req, file, cb) => {
++        if (ALLOWED[file.mimetype]) return cb(null, true);
++        const err = new Error("Only JPG, PNG or WEBP images are allowed");
++        err.code = "INVALID_FILE_TYPE";
++        cb(err);
++    },
++});
++
++// Wraps multer so upload errors return clean 400 JSON instead of crashing the request
++const handle = (middleware) => (req, res, next) =>
++    middleware(req, res, (err) => {
++        if (!err) return next();
++
++        const messages = {
++            LIMIT_FILE_SIZE: "Each image must be under 5 MB",
++            LIMIT_FILE_COUNT: "You can upload at most 3 photos",
++            LIMIT_UNEXPECTED_FILE: `Unexpected file field "${err.field}"`,
++        };
++
++        return res.status(400).json({
++            success: false,
++            message: messages[err.code] || err.message || "Upload failed",
++        });
++    });
++
++export const uploadComplaintPhotos = handle(imageUpload.array("photos", 3));
++export const uploadAfterPhoto = handle(imageUpload.single("afterPhoto"));
++
++// Build the public URL for a saved file
++export const fileUrl = (req, file) =>
++    `${req.protocol}://${req.get("host")}/uploads/${file.filename}`;
++
++// Remove files from a failed request so orphan uploads don't pile up
++export const cleanupFiles = (files = []) => {
++    for (const f of files) fs.unlink(f.path, () => {});
++};
+diff --git a/backend/src/models/Complaint.js b/backend/src/models/Complaint.js
+new file mode 100644
+index 0000000..196104a
+--- /dev/null
++++ b/backend/src/models/Complaint.js
+@@ -0,0 +1,95 @@
++import mongoose from "mongoose";
++import config from "../config/complaintConfig.js";
++
++const flairIds = config.flairs.map((f) => f.id);
++
++const photoSchema = new mongoose.Schema(
++    { url: { type: String, required: true }, name: { type: String, default: "" } },
++    { _id: false }
++);
++
++const updateSchema = new mongoose.Schema(
++    {
++        status: { type: String, enum: config.statuses, required: true },
++        comment: { type: String, trim: true, maxlength: 1000, default: "" },
++        by: { type: String, required: true },
++        at: { type: Date, default: Date.now },
++    },
++    { _id: true }
++);
++
++const complaintSchema = new mongoose.Schema(
++    {
++        ticketNo: { type: String, required: true, unique: true },
++
++        flair: { type: String, enum: flairIds, required: true },
++        flairGroup: { type: String, required: true },
++
++        // Location is resolved server-side from config ids — never trusted from the client
++        location: {
++            buildingId: { type: String, required: true },
++            building: { type: String, required: true },
++            floorId: { type: String, required: true },
++            floor: { type: String, required: true },
++            roomId: { type: String, required: true },
++            roomName: { type: String, required: true },
++            roomType: { type: String, required: true },
++            spot: { type: String, trim: true, maxlength: 200, default: null },
++        },
++
++        title: { type: String, required: true, trim: true, maxlength: 150 },
++        description: { type: String, required: true, trim: true, maxlength: 2000 },
++        photos: { type: [photoSchema], default: [] },
++
++        priority: { type: String, enum: config.priorities, required: true },
++        prioritySource: { type: String, enum: ["flair", "keyword", "admin"], required: true },
++        matchedKeywords: { type: [String], default: [] },
++        detectedPriority: { type: String, enum: config.priorities },
++        priorityOverrideReason: { type: String, default: null },
++
++        status: { type: String, enum: config.statuses, default: "Reported" },
++
++        reportedBy: {
++            type: mongoose.Schema.Types.ObjectId,
++            ref: "User",
++            required: true,
++        },
++        reporterType: { type: String, enum: ["Student", "Faculty"], default: "Student" },
++
++        assignedWorker: {
++            type: mongoose.Schema.Types.ObjectId,
++            ref: "Worker",
++            default: null,
++        },
++
++        // Snapshot taken at creation (used for list filters and badges).
++        // Full history is computed live on the detail endpoints.
++        isRecurring: { type: Boolean, default: false },
++        recurrenceCount: { type: Number, default: 0 },
++
++        updates: { type: [updateSchema], default: [] },
++
++        resolution: {
++            type: new mongoose.Schema(
++                {
++                    note: { type: String, trim: true, maxlength: 1000 },
++                    afterPhoto: { type: photoSchema, default: null },
++                    resolvedAt: { type: Date },
++                },
++                { _id: false }
++            ),
++            default: null,
++        },
++    },
++    { timestamps: true }
++);
++
++// Supports the recurrence lookup (same room + flair, recent) and dashboard filters
++complaintSchema.index({ "location.roomId": 1, flair: 1, createdAt: -1 });
++complaintSchema.index({ status: 1, priority: 1 });
++complaintSchema.index({ reportedBy: 1, createdAt: -1 });
++complaintSchema.index({ assignedWorker: 1, status: 1 });
++
++const Complaint = mongoose.model("Complaint", complaintSchema);
++
++export default Complaint;
+diff --git a/backend/src/models/Counter.js b/backend/src/models/Counter.js
+new file mode 100644
+index 0000000..6470c70
+--- /dev/null
++++ b/backend/src/models/Counter.js
+@@ -0,0 +1,20 @@
++import mongoose from "mongoose";
++
++// Atomic sequence generator used for human-friendly ticket numbers (MT-1001, MT-1002...)
++const counterSchema = new mongoose.Schema({
++    _id: { type: String, required: true },
++    seq: { type: Number, default: 1000 },
++});
++
++const Counter = mongoose.model("Counter", counterSchema);
++
++export async function nextSequence(name) {
++    const counter = await Counter.findOneAndUpdate(
++        { _id: name },
++        { $inc: { seq: 1 } },
++        { new: true, upsert: true, setDefaultsOnInsert: true }
++    );
++    return counter.seq;
++}
++
++export default Counter;
+diff --git a/backend/src/models/Worker.js b/backend/src/models/Worker.js
+new file mode 100644
+index 0000000..624e063
+--- /dev/null
++++ b/backend/src/models/Worker.js
+@@ -0,0 +1,23 @@
++import mongoose from "mongoose";
++import config from "../config/complaintConfig.js";
++
++const groupIds = config.flairGroups.map((g) => g.id);
++
++// Maintenance workers are records the admin assigns — they do not log in.
++const workerSchema = new mongoose.Schema(
++    {
++        name: { type: String, required: true, trim: true },
++        phone: { type: String, trim: true, default: "" },
++        skills: [{ type: String, enum: groupIds }],
++        status: {
++            type: String,
++            enum: ["Available", "Busy", "Off Duty"],
++            default: "Available",
++        },
++    },
++    { timestamps: true }
++);
++
++const Worker = mongoose.model("Worker", workerSchema);
++
++export default Worker;
+diff --git a/backend/src/routes/adminComplaintRoutes.js b/backend/src/routes/adminComplaintRoutes.js
+new file mode 100644
+index 0000000..f9e43f3
+--- /dev/null
++++ b/backend/src/routes/adminComplaintRoutes.js
+@@ -0,0 +1,35 @@
++import express from "express";
++
++import protect from "../middleware/authMiddleware.js";
++import adminOnly from "../middleware/adminMiddleware.js";
++import { uploadAfterPhoto } from "../middleware/uploadMiddleware.js";
++import {
++    listComplaints,
++    getComplaintDetail,
++    assignWorker,
++    addStatusUpdate,
++    overridePriority,
++    resolveComplaint,
++    listWorkers,
++    createWorker,
++    getStats,
++} from "../controllers/adminComplaintController.js";
++
++// Mounted at /api/admin alongside the existing adminRoutes (profile).
++// Every route is admin-only.
++const router = express.Router();
++const admin = [protect, adminOnly];
++
++router.get("/complaints", admin, listComplaints);
++router.get("/complaints/:id", admin, getComplaintDetail);
++router.post("/complaints/:id/assign", admin, assignWorker);
++router.post("/complaints/:id/updates", admin, addStatusUpdate);
++router.patch("/complaints/:id/priority", admin, overridePriority);
++router.post("/complaints/:id/resolve", admin, uploadAfterPhoto, resolveComplaint);
++
++router.get("/workers", admin, listWorkers);
++router.post("/workers", admin, createWorker);
++
++router.get("/stats", admin, getStats);
++
++export default router;
+diff --git a/backend/src/routes/complaintRoutes.js b/backend/src/routes/complaintRoutes.js
+new file mode 100644
+index 0000000..ab817ad
+--- /dev/null
++++ b/backend/src/routes/complaintRoutes.js
+@@ -0,0 +1,21 @@
++import express from "express";
++
++import protect from "../middleware/authMiddleware.js";
++import { uploadComplaintPhotos } from "../middleware/uploadMiddleware.js";
++import {
++    getComplaintConfig,
++    previewPriority,
++    createComplaint,
++    getMyComplaints,
++    getMyComplaint,
++} from "../controllers/complaintController.js";
++
++const router = express.Router();
++
++router.get("/config", protect, getComplaintConfig);
++router.post("/preview", protect, previewPriority);
++router.post("/", protect, uploadComplaintPhotos, createComplaint);
++router.get("/mine", protect, getMyComplaints);
++router.get("/:id", protect, getMyComplaint);
++
++export default router;
+diff --git a/backend/src/scripts/seed.js b/backend/src/scripts/seed.js
+new file mode 100644
+index 0000000..7cb77a5
+--- /dev/null
++++ b/backend/src/scripts/seed.js
+@@ -0,0 +1,217 @@
++/**
++ * Demo data seeder.
++ *
++ *   node src/scripts/seed.js                  -> adds workers + demo complaints (reported by the first user in the DB)
++ *   node src/scripts/seed.js you@mail.com     -> complaints reported by that user
++ *   node src/scripts/seed.js --reset          -> WIPES complaints, workers and the ticket counter first
++ *
++ * Register at least one normal user in the app before running this.
++ */
++import dotenv from "dotenv";
++import mongoose from "mongoose";
++
++import User from "../models/User.js";
++import Worker from "../models/Worker.js";
++import Complaint from "../models/Complaint.js";
++import Counter, { nextSequence } from "../models/Counter.js";
++import config, { flairById, resolveLocation } from "../config/complaintConfig.js";
++import { detectPriority } from "../utils/priority.js";
++
++dotenv.config();
++
++const DAY = 24 * 60 * 60 * 1000;
++const HOUR = 60 * 60 * 1000;
++const args = process.argv.slice(2);
++const reset = args.includes("--reset");
++const email = args.find((a) => a.includes("@"));
++
++// Deterministic pseudo-random so every seed run looks the same
++let s = 42;
++const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
++const pick = (arr) => arr[Math.floor(rand() * arr.length)];
++
++const WORKERS = [
++    { name: "Ramesh Patil", phone: "9820000001", skills: ["electrical-safety", "classroom"] },
++    { name: "Suresh Yadav", phone: "9820000002", skills: ["electrical-safety"] },
++    { name: "Anil Kamble", phone: "9820000003", skills: ["water-washroom"] },
++    { name: "Vijay Shinde", phone: "9820000004", skills: ["water-washroom", "campus"] },
++    { name: "Priya Nair", phone: "9820000005", skills: ["labs-it"] },
++    { name: "Rohit Desai", phone: "9820000006", skills: ["labs-it", "classroom"] },
++    { name: "Mangesh Gawde", phone: "9820000007", skills: ["canteen", "campus"] },
++    { name: "Sunita More", phone: "9820000008", skills: ["campus", "classroom"], status: "Off Duty" },
++];
++
++// [daysAgo, roomId, flair, title, description, finalStatus]
++const SCRIPTED = [
++    // Demo story: LH-204 electrical issue already reported twice this month
++    [24, "lh-204", "electrical-hazard", "Switchboard sparking near door", "The switchboard next to the door made sparks when the fan switch was turned on.", "Resolved"],
++    [9, "lh-204", "electrical-hazard", "Exposed wire behind projector socket", "Wire insulation is torn and copper is visible behind the projector socket.", "In Progress"],
++
++    // Tap that leaks every month
++    [85, "a-1-wr", "plumbing", "Tap leaking in washroom", "Second tap from the left keeps dripping.", "Resolved"],
++    [57, "a-1-wr", "plumbing", "Same tap leaking again", "The tap that was fixed last month is leaking again.", "Resolved"],
++    [29, "a-1-wr", "plumbing", "Tap leak back again", "Water dripping all day from the same tap.", "Resolved"],
++    [3, "a-1-wr", "plumbing", "Washroom tap leaking (again)", "Third time this tap is leaking. Floor stays wet.", "Assigned"],
++
++    // Computer Lab 3: most complained-about room
++    [27, "cl-3", "computer", "PC 12 not booting", "PC 12 shows a black screen after the BIOS logo.", "Resolved"],
++    [20, "cl-3", "computer", "PC 7 keyboard not working", "Several keys on PC 7 keyboard are dead.", "Resolved"],
++    [14, "cl-3", "network", "No internet on row 3", "All PCs on row 3 show no network connection.", "Resolved"],
++    [10, "cl-3", "computer", "PC 12 not booting again", "Same PC 12 issue during practicals.", "In Progress"],
++    [6, "cl-3", "computer", "Mouse missing at PC 4", "PC 4 has no mouse.", "Reported"],
++    [2, "cl-3", "ac", "AC not cooling in lab", "Lab is very hot, AC is running but not cooling.", "Reported"],
++
++    // Canteen
++    [18, "main-canteen", "canteen-hygiene", "Cockroaches near food counter", "Saw cockroaches near the samosa tray.", "Resolved"],
++    [5, "main-canteen", "canteen-hygiene", "Dirty plates being served", "Plates have food stains on them.", "In Progress"],
++    [12, "cb-water", "water-filter", "Water filter giving warm water", "Cooler near the canteen is giving warm water.", "Resolved"],
++    [1, "cb-water", "water-filter", "Water filter not working", "No water coming from the filter at all. no water since morning.", "Reported"],
++];
++
++const FILLERS = [
++    ["lh-101", "fan", "Fan not working", "Ceiling fan near the window does not start."],
++    ["lh-102", "projector", "Projector flickering", "Projector display keeps flickering during lectures."],
++    ["lh-201", "smart-board", "Smart board not responding", "Touch input on the smart board is not working."],
++    ["lh-205", "furniture", "Broken bench in last row", "Bench in the last row has a broken plank."],
++    ["lh-301", "smart-board", "Smart board pen not working", "The stylus for the smart board does not register."],
++    ["lh-401", "lights", "Tube light not working", "Two tube lights in the front are off."],
++    ["seminar-1", "ac", "AC leaking water", "AC unit is dripping water on the chairs."],
++    ["el-1", "lab-equipment", "Oscilloscope faulty", "Oscilloscope on bench 3 gives no display."],
++    ["lib-reading", "fan", "Fan making noise", "Fan makes a loud rattling noise."],
++    ["lib-digital", "network", "Wi-Fi very slow", "Wi-Fi in the digital library is extremely slow."],
++    ["b-2-wr", "washroom-hygiene", "Washroom not cleaned", "Washroom has not been cleaned since morning."],
++    ["c-2-wr", "plumbing", "Flush not working", "Flush in the second cubicle is broken."],
++    ["a-0-lobby", "lift", "Lift stuck on 2nd floor", "The lift is stuck between floors."],
++    ["a-2-corridor", "structural", "Crack in corridor wall", "A long crack has appeared on the corridor wall."],
++    ["main-aud", "fire-safety", "Fire extinguisher expired", "Extinguisher near the stage shows an expired date."],
++    ["canteen-kitchen", "canteen-equipment", "Mixer not working", "The canteen mixer has stopped working."],
++    ["lh-101", "cleanliness", "Classroom dustbin overflowing", "Dustbin has not been emptied."],
++    ["lh-204", "fan", "Fan regulator broken", "Fan only runs at full speed."],
++    ["cl-1", "computer", "PC 3 very slow", "PC 3 takes 10 minutes to boot."],
++    ["a-1-staff", "ac", "Staff room AC not working", "AC does not turn on."],
++    ["lh-102", "fan", "Fan wobbling", "Fan is wobbling dangerously."],
++    ["main-canteen", "canteen-food", "Stale food served", "Vada pav tasted stale."],
++    ["lh-301", "projector", "Projector HDMI not working", "Laptop does not connect via HDMI."],
++    ["c-1-staff", "power-outage", "No power in staff room", "No power in the staff room since 10 am."],
++];
++
++const findRoom = (roomId) => {
++    for (const b of config.buildings)
++        for (const f of b.floors)
++            for (const r of f.rooms)
++                if (r.id === roomId) return resolveLocation(b.id, f.id, r.id);
++    throw new Error(`Unknown room ${roomId}`);
++};
++
++async function main() {
++    await mongoose.connect(process.env.mongoUri || process.env.MONGO_URI);
++    console.log("Connected to MongoDB");
++
++    if (reset) {
++        await Promise.all([Complaint.deleteMany({}), Worker.deleteMany({}), Counter.deleteMany({})]);
++        console.log("Reset: complaints, workers and counter cleared");
++    }
++
++    const reporter = email ? await User.findOne({ email: email.toLowerCase() }) : await User.findOne();
++    if (!reporter) throw new Error("No user found. Register a normal user in the app first.");
++
++    let workers = await Worker.find();
++    if (!workers.length) {
++        workers = await Worker.insertMany(WORKERS);
++        console.log(`Created ${workers.length} workers`);
++    }
++    const workerFor = (flair) => {
++        const group = flairById[flair].group;
++        const skilled = workers.filter((w) => w.skills.includes(group) && w.status !== "Off Duty");
++        return pick(skilled.length ? skilled : workers);
++    };
++
++    const fillerStatuses = ["Resolved", "Resolved", "Resolved", "In Progress", "Assigned", "Reported"];
++    const rows = [
++        ...SCRIPTED,
++        ...FILLERS.map(([room, flair, title, desc]) => [
++            Math.floor(rand() * 60) + 1, room, flair, title, desc, pick(fillerStatuses),
++        ]),
++    ].sort((a, b) => b[0] - a[0]); // oldest first, so recurrence counts build up correctly
++
++    const now = Date.now();
++    const created = [];
++
++    for (const [daysAgo, roomId, flair, title, description, finalStatus] of rows) {
++        const createdAt = new Date(now - daysAgo * DAY - Math.floor(rand() * 8) * HOUR);
++        const location = findRoom(roomId);
++        const detected = detectPriority(flair, title, description);
++
++        const prior = created.filter(
++            (c) =>
++                c.location.roomId === roomId &&
++                c.flair === flair &&
++                createdAt - c.createdAt <= config.recurrenceWindowDays * DAY
++        );
++
++        const updates = [{ status: "Reported", comment: "Complaint submitted.", by: "System", at: createdAt }];
++        let assignedWorker = null;
++        let resolution = null;
++        let t = createdAt.getTime();
++
++        if (finalStatus !== "Reported") {
++            const w = workerFor(flair);
++            assignedWorker = w._id;
++            t += 2 * HOUR;
++            updates.push({ status: "Assigned", comment: `Assigned to ${w.name}.`, by: "Admin", at: new Date(t) });
++        }
++        if (["In Progress", "Resolved"].includes(finalStatus)) {
++            t += 4 * HOUR;
++            updates.push({ status: "In Progress", comment: "Technician is on site.", by: "Admin", at: new Date(t) });
++        }
++        if (finalStatus === "Resolved") {
++            t += (6 + Math.floor(rand() * 40)) * HOUR;
++            const resolvedAt = new Date(Math.min(t, now - HOUR));
++            resolution = { note: "Issue fixed and verified.", afterPhoto: null, resolvedAt };
++            updates.push({ status: "Resolved", comment: "Issue fixed and verified.", by: "Admin", at: resolvedAt });
++        }
++
++        const doc = new Complaint({
++            ticketNo: `MT-${await nextSequence("complaint")}`,
++            flair,
++            flairGroup: flairById[flair].group,
++            location: { ...location, spot: null },
++            title,
++            description,
++            photos: [{ url: `https://placehold.co/800x600?text=${encodeURIComponent(title)}`, name: "photo.jpg" }],
++            priority: detected.priority,
++            prioritySource: detected.source,
++            detectedPriority: detected.priority,
++            matchedKeywords: detected.matchedKeywords,
++            status: finalStatus,
++            reportedBy: reporter._id,
++            reporterType: rand() > 0.8 ? "Faculty" : "Student",
++            assignedWorker,
++            isRecurring: prior.length > 0,
++            recurrenceCount: prior.length,
++            updates,
++            resolution,
++        });
++
++        const err = doc.validateSync();
++        if (err) throw err;
++
++        // Raw insert so the back-dated createdAt is kept (Mongoose would overwrite it)
++        const raw = doc.toObject();
++        raw.createdAt = createdAt;
++        raw.updatedAt = updates[updates.length - 1].at;
++        await Complaint.collection.insertOne(raw);
++
++        created.push({ ...raw });
++    }
++
++    console.log(`Created ${created.length} complaints reported by ${reporter.email}`);
++    console.log("Demo: report 'switchboard sparking' in B Block > 2nd Floor > LH-204 with the Electrical Hazard flair.");
++    await mongoose.disconnect();
++}
++
++main().catch(async (err) => {
++    console.error("Seed failed:", err.message);
++    await mongoose.disconnect();
++    process.exit(1);
++});
+diff --git a/backend/src/utils/complaintStats.js b/backend/src/utils/complaintStats.js
+new file mode 100644
+index 0000000..5cf8777
+--- /dev/null
++++ b/backend/src/utils/complaintStats.js
+@@ -0,0 +1,165 @@
++import config, { flairById, groupById } from "../config/complaintConfig.js";
++
++const DAY_MS = 24 * 60 * 60 * 1000;
++
++const countBy = (items, keyFn) => {
++    const map = new Map();
++    for (const item of items) {
++        const key = keyFn(item);
++        map.set(key, (map.get(key) || 0) + 1);
++    }
++    return map;
++};
++
++const sortDesc = (arr) => arr.sort((a, b) => b.count - a.count);
++
++/**
++ * Pure function: builds the whole admin Stats object from lean complaint docs.
++ * Easy to unit test and fast enough for campus-scale data (thousands of rows).
++ */
++export function buildStats(complaints, now = new Date()) {
++    const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
++    const isOpen = (c) => c.status !== "Resolved";
++
++    const resolved = complaints.filter((c) => c.status === "Resolved" && c.resolution?.resolvedAt);
++    const avgResolutionHours = resolved.length
++        ? +(
++              resolved.reduce(
++                  (sum, c) => sum + (new Date(c.resolution.resolvedAt) - new Date(c.createdAt)),
++                  0
++              ) /
++              resolved.length /
++              3600000
++          ).toFixed(1)
++        : 0;
++
++    const kpis = {
++        total: complaints.length,
++        open: complaints.filter(isOpen).length,
++        criticalOpen: complaints.filter((c) => isOpen(c) && c.priority === "Critical").length,
++        resolvedThisWeek: resolved.filter((c) => new Date(c.resolution.resolvedAt) >= weekAgo).length,
++        avgResolutionHours,
++        recurringCount: complaints.filter((c) => c.isRecurring).length,
++    };
++
++    const statusCounts = countBy(complaints, (c) => c.status);
++    const byStatus = config.statuses.map((status) => ({ status, count: statusCounts.get(status) || 0 }));
++
++    const priorityCounts = countBy(complaints, (c) => c.priority);
++    const byPriority = config.priorities.map((priority) => ({
++        priority,
++        count: priorityCounts.get(priority) || 0,
++    }));
++
++    const byFlair = sortDesc(
++        [...countBy(complaints, (c) => c.flair)].map(([flair, count]) => ({
++            flair,
++            label: flairById[flair]?.label ?? flair,
++            color: flairById[flair]?.color ?? "#64748B",
++            count,
++        }))
++    );
++
++    const byFlairGroup = sortDesc(
++        [...countBy(complaints, (c) => c.flairGroup)].map(([group, count]) => ({
++            group,
++            label: groupById[group]?.label ?? group,
++            count,
++        }))
++    );
++
++    const byRoomType = sortDesc(
++        [...countBy(complaints, (c) => c.location.roomType)].map(([roomType, count]) => ({
++            roomType,
++            count,
++        }))
++    );
++
++    const buildingMap = new Map();
++    for (const c of complaints) {
++        const b = buildingMap.get(c.location.building) || {
++            building: c.location.building,
++            count: 0,
++            open: 0,
++            critical: 0,
++        };
++        b.count += 1;
++        if (isOpen(c)) b.open += 1;
++        if (c.priority === "Critical") b.critical += 1;
++        buildingMap.set(c.location.building, b);
++    }
++    const byBuilding = sortDesc([...buildingMap.values()]);
++
++    const roomMap = new Map();
++    for (const c of complaints) {
++        const key = c.location.roomId;
++        const r = roomMap.get(key) || {
++            roomId: key,
++            roomName: c.location.roomName,
++            roomType: c.location.roomType,
++            building: c.location.building,
++            count: 0,
++            open: 0,
++        };
++        r.count += 1;
++        if (isOpen(c)) r.open += 1;
++        roomMap.set(key, r);
++    }
++    const topRooms = sortDesc([...roomMap.values()]).slice(0, 10);
++
++    // Room × flair matrix for the top 8 rooms (stacked bar: what fails most where)
++    const top8 = new Set(topRooms.slice(0, 8).map((r) => r.roomId));
++    const roomFlairMatrix = [
++        ...countBy(
++            complaints.filter((c) => top8.has(c.location.roomId)),
++            (c) => `${c.location.roomId}|${c.flair}`
++        ),
++    ].map(([key, count]) => {
++        const [roomId, flair] = key.split("|");
++        return {
++            roomId,
++            roomName: roomMap.get(roomId).roomName,
++            flair,
++            label: flairById[flair]?.label ?? flair,
++            count,
++        };
++    });
++
++    // Hotspots: same room + same flair reported 2+ times in the selected range
++    const hotspots = sortDesc(
++        [...countBy(complaints, (c) => `${c.location.roomId}|${c.flair}`)]
++            .filter(([, count]) => count >= 2)
++            .map(([key, count]) => {
++                const [roomId, flair] = key.split("|");
++                const room = roomMap.get(roomId);
++                return {
++                    roomId,
++                    roomName: room.roomName,
++                    roomType: room.roomType,
++                    building: room.building,
++                    flair,
++                    label: flairById[flair]?.label ?? flair,
++                    count,
++                };
++            })
++    ).slice(0, 10);
++
++    const trendMap = countBy(complaints, (c) => new Date(c.createdAt).toISOString().slice(0, 10));
++    const trend = [...trendMap]
++        .map(([date, count]) => ({ date, count }))
++        .sort((a, b) => a.date.localeCompare(b.date));
++
++    return {
++        kpis,
++        byStatus,
++        byPriority,
++        byFlair,
++        byFlairGroup,
++        byRoomType,
++        byBuilding,
++        topRooms,
++        roomFlairMatrix,
++        hotspots,
++        trend,
++    };
++}
+diff --git a/backend/src/utils/priority.js b/backend/src/utils/priority.js
+new file mode 100644
+index 0000000..688e187
+--- /dev/null
++++ b/backend/src/utils/priority.js
+@@ -0,0 +1,49 @@
++import config, { flairById, PRIORITY_RANK } from "../config/complaintConfig.js";
++
++const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
++
++// Pre-compile whole-word / whole-phrase matchers, e.g. "fire" must not match "firewall"
++const keywordMatchers = Object.entries(config.escalationKeywords).flatMap(
++    ([level, words]) =>
++        words.map((word) => ({
++            level,
++            word,
++            regex: new RegExp(`\\b${escapeRegex(word.toLowerCase()).replace(/\s+/g, "\\s+")}\\b`, "i"),
++        }))
++);
++
++/**
++ * Priority = the higher of (flair default) and (highest escalation keyword matched).
++ * Keywords can only RAISE priority, never lower it.
++ */
++export function detectPriority(flairId, ...texts) {
++    const flair = flairById[flairId];
++    if (!flair) return null;
++
++    const text = texts.filter(Boolean).join(" ");
++
++    const matched = keywordMatchers.filter((m) => m.regex.test(text));
++
++    let keywordLevel = null;
++    for (const m of matched) {
++        if (keywordLevel === null || PRIORITY_RANK[m.level] > PRIORITY_RANK[keywordLevel]) {
++            keywordLevel = m.level;
++        }
++    }
++
++    const raised =
++        keywordLevel !== null &&
++        PRIORITY_RANK[keywordLevel] > PRIORITY_RANK[flair.defaultPriority];
++
++    // Only report keywords at the winning level (e.g. "sparking", not also "stuck")
++    const matchedKeywords = raised
++        ? [...new Set(matched.filter((m) => m.level === keywordLevel).map((m) => m.word))]
++        : [];
++
++    return {
++        priority: raised ? keywordLevel : flair.defaultPriority,
++        source: raised ? "keyword" : "flair",
++        flairDefault: flair.defaultPriority,
++        matchedKeywords,
++    };
++}
+diff --git a/backend/src/utils/recurrence.js b/backend/src/utils/recurrence.js
+new file mode 100644
+index 0000000..f3ec959
+--- /dev/null
++++ b/backend/src/utils/recurrence.js
+@@ -0,0 +1,40 @@
++import Complaint from "../models/Complaint.js";
++import config from "../config/complaintConfig.js";
++
++const DAY_MS = 24 * 60 * 60 * 1000;
++
++/**
++ * Find earlier complaints with the same room + flair inside the recurrence window.
++ * `before` = the reference time (creation time of the complaint being checked).
++ * `excludeId` = the complaint itself.
++ */
++export async function findRecurrence({ roomId, flair, before = new Date(), excludeId = null }) {
++    const windowDays = config.recurrenceWindowDays;
++    const since = new Date(before.getTime() - windowDays * DAY_MS);
++
++    const query = {
++        "location.roomId": roomId,
++        flair,
++        createdAt: { $gte: since, $lte: before },
++    };
++    if (excludeId) query._id = { $ne: excludeId };
++
++    const history = await Complaint.find(query)
++        .sort({ createdAt: -1 })
++        .select("ticketNo title status createdAt resolution.resolvedAt")
++        .lean();
++
++    return {
++        isRecurring: history.length > 0,
++        count: history.length,
++        windowDays,
++        history: history.map((h) => ({
++            id: h._id.toString(),
++            ticketNo: h.ticketNo,
++            title: h.title,
++            status: h.status,
++            createdAt: h.createdAt,
++            resolvedAt: h.resolution?.resolvedAt ?? null,
++        })),
++    };
++}
+diff --git a/backend/src/utils/serializeComplaint.js b/backend/src/utils/serializeComplaint.js
+new file mode 100644
+index 0000000..96a6367
+--- /dev/null
++++ b/backend/src/utils/serializeComplaint.js
+@@ -0,0 +1,62 @@
++// Converts a Complaint document into the exact shape the frontend expects.
++// reportedBy and assignedWorker should be populated before calling this.
++export function serializeComplaint(doc, recurrence = null) {
++    const c = typeof doc.toObject === "function" ? doc.toObject() : doc;
++
++    const reporter = c.reportedBy && typeof c.reportedBy === "object" && c.reportedBy.name
++        ? {
++              id: c.reportedBy._id.toString(),
++              name: c.reportedBy.name,
++              email: c.reportedBy.email,
++              type: c.reporterType,
++          }
++        : { id: c.reportedBy?.toString?.() ?? null, name: null, email: null, type: c.reporterType };
++
++    const worker = c.assignedWorker && typeof c.assignedWorker === "object" && c.assignedWorker.name
++        ? { id: c.assignedWorker._id.toString(), name: c.assignedWorker.name }
++        : null;
++
++    return {
++        id: c._id.toString(),
++        ticketNo: c.ticketNo,
++        flair: c.flair,
++        flairGroup: c.flairGroup,
++        location: {
++            buildingId: c.location.buildingId,
++            building: c.location.building,
++            floorId: c.location.floorId,
++            floor: c.location.floor,
++            roomId: c.location.roomId,
++            roomName: c.location.roomName,
++            roomType: c.location.roomType,
++            spot: c.location.spot ?? null,
++        },
++        title: c.title,
++        description: c.description,
++        photos: c.photos ?? [],
++        priority: c.priority,
++        prioritySource: c.prioritySource,
++        matchedKeywords: c.matchedKeywords ?? [],
++        detectedPriority: c.detectedPriority ?? c.priority,
++        priorityOverrideReason: c.priorityOverrideReason ?? null,
++        status: c.status,
++        reportedBy: reporter,
++        assignedWorker: worker,
++        recurrence: recurrence ?? {
++            isRecurring: c.isRecurring,
++            count: c.recurrenceCount,
++            windowDays: null,
++            history: [],
++        },
++        updates: (c.updates ?? []).map((u) => ({
++            id: u._id?.toString(),
++            status: u.status,
++            comment: u.comment,
++            by: u.by,
++            at: u.at,
++        })),
++        resolution: c.resolution ?? null,
++        createdAt: c.createdAt,
++        updatedAt: c.updatedAt,
++    };
++}

@@ -1,0 +1,283 @@
+{
+  "priorities": [
+    "Low",
+    "Medium",
+    "High",
+    "Critical"
+  ],
+
+  "statuses": [
+    "Reported",
+    "In Progress",
+    "Escalated",
+    "Resolved"
+  ],
+
+  "institution": {
+    "name": "Xavier Institute of Engineering",
+    "shortName": "XIE",
+    "location": "Mahim West, Mumbai",
+    "address": "Opposite S L Raheja Hospital, Mahim Causeway, Mahim West, Mumbai",
+    "email": "office@xavier.ac.in",
+    "phone": "+91 7249371505 / 9920407274",
+    "website": "https://www.xavier.ac.in",
+    "emergencyNote": "Move away from the area and keep others away. Inform the security guard at the main entrance (24x7) or the General Office immediately."
+  },
+
+  "emailDomains": {
+    "student.xavier.ac.in": "Student",
+    "xavier.ac.in": "Teacher"
+  },
+
+  "userTypes": [
+    "Student",
+    "Teacher"
+  ],
+
+  "departments": [
+    {"id": "comp", "label": "Computer Engineering"},
+    {"id": "it", "label": "Information Technology"},
+    {"id": "ece", "label": "Electronics and Computer Engineering"},
+    {"id": "cse", "label": "Computer Science and Engineering"},
+    {"id": "other", "label": "Other / Administration"}
+  ],
+
+  "recurrenceWindowDays": 30,
+
+  "repeatEscalation": {
+    "sameRoom": [
+      { "minPrevious": 2, "raiseBy": 1 },
+      { "minPrevious": 4, "raiseBy": 2 }
+    ],
+    "campusWide": { "windowDays": 7, "minPrevious": 5, "raiseBy": 1 }
+  },
+
+  "flairGroups": [
+    {"id": "electrical-safety", "label": "Electrical & Safety"},
+    {"id": "classroom", "label": "Classroom Resources"},
+    {"id": "labs-it", "label": "Labs & IT"},
+    {"id": "water-washroom", "label": "Water & Washroom"},
+    {"id": "canteen", "label": "Canteen"},
+    {"id": "campus", "label": "Campus"}
+  ],
+
+  "flairs": [
+    {"id": "electrical-hazard", "label": "Electrical Hazard", "group": "electrical-safety", "icon": "Zap", "color": "#DC2626", "defaultPriority": "Critical", "handledBy": "Electrician"},
+    {"id": "fire-safety", "label": "Fire Safety", "group": "electrical-safety", "icon": "Flame", "color": "#EA580C", "defaultPriority": "Critical", "handledBy": "Admin Office"},
+    {"id": "power-outage", "label": "Power Outage", "group": "electrical-safety", "icon": "PlugZap", "color": "#D97706", "defaultPriority": "High", "handledBy": "Electrician"},
+    {"id": "lights", "label": "Lights Not Working", "group": "electrical-safety", "icon": "Lightbulb", "color": "#CA8A04", "defaultPriority": "Low", "handledBy": "Electrician"},
+    {"id": "fan", "label": "Fan Not Working", "group": "classroom", "icon": "Fan", "color": "#0891B2", "defaultPriority": "Medium", "handledBy": "Electrician"},
+    {"id": "ac", "label": "AC Not Working", "group": "classroom", "icon": "AirVent", "color": "#0284C7", "defaultPriority": "Medium", "handledBy": "AC maintenance (AMC)"},
+    {"id": "projector", "label": "Projector Issue", "group": "classroom", "icon": "Projector", "color": "#4F46E5", "defaultPriority": "Medium", "handledBy": "Lab Assistant / System Administrator"},
+    {"id": "smart-board", "label": "Smart Board Not Working", "group": "classroom", "icon": "Presentation", "color": "#7C3AED", "defaultPriority": "Medium", "handledBy": "Lab Assistant / System Administrator"},
+    {"id": "furniture", "label": "Broken Bench / Chair", "group": "classroom", "icon": "Armchair", "color": "#A16207", "defaultPriority": "Low", "handledBy": "Admin Office"},
+    {"id": "computer", "label": "Computer / Lab PC Issue", "group": "labs-it", "icon": "Monitor", "color": "#2563EB", "defaultPriority": "Medium", "handledBy": "Lab Assistant / System Administrator"},
+    {"id": "network", "label": "Wi-Fi & Network", "group": "labs-it", "icon": "Wifi", "color": "#0D9488", "defaultPriority": "Medium", "handledBy": "System Administrator"},
+    {"id": "lab-equipment", "label": "Lab Equipment Fault", "group": "labs-it", "icon": "FlaskConical", "color": "#9333EA", "defaultPriority": "Medium", "handledBy": "Lab In-charge / Lab Assistant"},
+    {"id": "printer", "label": "Printer Issue", "group": "labs-it", "icon": "Printer", "color": "#475569", "defaultPriority": "Low", "handledBy": "Lab Assistant"},
+    {"id": "software", "label": "Software / System Issue", "group": "labs-it", "icon": "AppWindow", "color": "#6366F1", "defaultPriority": "Medium", "handledBy": "System Administrator"},
+    {"id": "water-filter", "label": "Water Purifier / Cooler", "group": "water-washroom", "icon": "GlassWater", "color": "#0EA5E9", "defaultPriority": "High", "handledBy": "Water purifier / cooler maintenance (AMC)"},
+    {"id": "plumbing", "label": "Plumbing / Tap Leak", "group": "water-washroom", "icon": "Droplets", "color": "#3B82F6", "defaultPriority": "Medium", "handledBy": "Admin Office"},
+    {"id": "washroom-hygiene", "label": "Washroom Hygiene", "group": "water-washroom", "icon": "Bath", "color": "#14B8A6", "defaultPriority": "Medium", "handledBy": "Housekeeping (Admin Office)"},
+    {"id": "canteen-hygiene", "label": "Canteen Hygiene", "group": "canteen", "icon": "Bug", "color": "#E11D48", "defaultPriority": "High", "handledBy": "Canteen Committee"},
+    {"id": "canteen-food", "label": "Canteen Food Quality", "group": "canteen", "icon": "UtensilsCrossed", "color": "#F59E0B", "defaultPriority": "Medium", "handledBy": "Canteen Committee"},
+    {"id": "canteen-equipment", "label": "Canteen Equipment", "group": "canteen", "icon": "CookingPot", "color": "#B45309", "defaultPriority": "Low", "handledBy": "Canteen Committee"},
+    {"id": "lift", "label": "Lift Not Working", "group": "campus", "icon": "ArrowUpDown", "color": "#DB2777", "defaultPriority": "High", "handledBy": "Lift maintenance (AMC)"},
+    {"id": "structural", "label": "Structural Damage", "group": "campus", "icon": "Construction", "color": "#B91C1C", "defaultPriority": "High", "handledBy": "Admin Office (major civil work via the Trust)"},
+    {"id": "doors-windows", "label": "Door / Window Damage", "group": "campus", "icon": "DoorOpen", "color": "#92400E", "defaultPriority": "Low", "handledBy": "Admin Office"},
+    {"id": "library", "label": "Library Issue", "group": "campus", "icon": "Library", "color": "#0F766E", "defaultPriority": "Low", "handledBy": "Library staff"},
+    {"id": "parking", "label": "Parking Issue", "group": "campus", "icon": "CircleParking", "color": "#4B5563", "defaultPriority": "Low", "handledBy": "Security / Admin Office"},
+    {"id": "cleanliness", "label": "Cleanliness / Housekeeping", "group": "campus", "icon": "Sparkles", "color": "#65A30D", "defaultPriority": "Low", "handledBy": "Housekeeping (Admin Office)"},
+    {"id": "intercom-cctv", "label": "Intercom / CCTV", "group": "campus", "icon": "Cctv", "color": "#334155", "defaultPriority": "Medium", "handledBy": "Admin Office (AMC)"},
+    {"id": "garden-grounds", "label": "Garden / Playground", "group": "campus", "icon": "Trees", "color": "#15803D", "defaultPriority": "Low", "handledBy": "Garden attendants"},
+    {"id": "other", "label": "Other", "group": "campus", "icon": "CircleHelp", "color": "#64748B", "defaultPriority": "Low", "handledBy": "Admin Office"}
+  ],
+
+  "escalationKeywords": {
+    "Critical": [
+      "sparking",
+      "spark",
+      "sparks",
+      "exposed wire",
+      "exposed wires",
+      "exposed wiring",
+      "short circuit",
+      "shock",
+      "electric shock",
+      "smoke",
+      "smoking",
+      "fire",
+      "burning smell",
+      "burning",
+      "gas leak",
+      "flooding",
+      "flooded",
+      "ceiling fell",
+      "collapse",
+      "collapsed"
+    ],
+    "High": [
+      "heavy leak",
+      "leaking heavily",
+      "no power",
+      "power cut",
+      "broken glass",
+      "stuck",
+      "no water",
+      "dirty water",
+      "contaminated",
+      "food poisoning",
+      "insect",
+      "insects",
+      "cockroach",
+      "cockroaches",
+      "rat",
+      "rats",
+      "vomiting"
+    ]
+  },
+
+  "roomTypes": [
+    "Classroom",
+    "Tutorial Room",
+    "Computer Lab",
+    "Electronics Lab",
+    "Science Lab",
+    "Workshop",
+    "Drawing Hall",
+    "Seminar Hall",
+    "Library",
+    "Office",
+    "Common Room",
+    "Canteen",
+    "Washroom",
+    "Corridor",
+    "Outdoor"
+  ],
+
+  "buildings": [
+    {
+      "id": "main", "name": "Main Building",
+      "floors": [
+        { "id": "classrooms", "name": "Classrooms & Tutorial Rooms", "rooms": [
+          {"id": "classroom-1", "name": "Classroom 1", "roomType": "Classroom"},
+          {"id": "classroom-2", "name": "Classroom 2", "roomType": "Classroom"},
+          {"id": "classroom-3", "name": "Classroom 3", "roomType": "Classroom"},
+          {"id": "classroom-4", "name": "Classroom 4", "roomType": "Classroom"},
+          {"id": "classroom-5", "name": "Classroom 5", "roomType": "Classroom"},
+          {"id": "classroom-6", "name": "Classroom 6", "roomType": "Classroom"},
+          {"id": "classroom-7", "name": "Classroom 7", "roomType": "Classroom"},
+          {"id": "classroom-8", "name": "Classroom 8", "roomType": "Classroom"},
+          {"id": "classroom-9", "name": "Classroom 9", "roomType": "Classroom"},
+          {"id": "tutorial-1", "name": "Tutorial Room 1", "roomType": "Tutorial Room"},
+          {"id": "tutorial-2", "name": "Tutorial Room 2", "roomType": "Tutorial Room"},
+          {"id": "drawing-hall", "name": "Drawing Hall", "roomType": "Drawing Hall"}
+        ]},
+        { "id": "cmpn-labs", "name": "Computer Engineering Labs", "rooms": [
+          {"id": "cmpn-db", "name": "Database Lab (Comp)", "roomType": "Computer Lab"},
+          {"id": "cmpn-ip", "name": "Image Processing Lab", "roomType": "Computer Lab"},
+          {"id": "cmpn-net", "name": "Network Lab (Comp)", "roomType": "Computer Lab"},
+          {"id": "cmpn-os", "name": "Operating System Lab", "roomType": "Computer Lab"},
+          {"id": "cmpn-sw", "name": "Software Lab (Comp)", "roomType": "Computer Lab"},
+          {"id": "cmpn-web", "name": "Web Design Lab", "roomType": "Computer Lab"},
+          {"id": "cmpn-proj", "name": "Project Lab (Comp)", "roomType": "Computer Lab"},
+          {"id": "cmpn-mac", "name": "MAC Lab", "roomType": "Computer Lab"}
+        ]},
+        { "id": "it-labs", "name": "IT Labs", "rooms": [
+          {"id": "it-sw1", "name": "Software Lab I (IT)", "roomType": "Computer Lab"},
+          {"id": "it-sw2", "name": "Software Lab II (IT)", "roomType": "Computer Lab"},
+          {"id": "it-ip", "name": "Internet Programming Lab", "roomType": "Computer Lab"},
+          {"id": "it-cn", "name": "Computer Network Lab (IT)", "roomType": "Computer Lab"},
+          {"id": "it-db", "name": "Database Lab (IT)", "roomType": "Computer Lab"},
+          {"id": "it-at", "name": "Advanced Technology Lab", "roomType": "Computer Lab"},
+          {"id": "it-proj", "name": "Project Lab (IT)", "roomType": "Computer Lab"}
+        ]},
+        { "id": "ece-labs", "name": "Electronics & Computer Engg Labs", "rooms": [
+          {"id": "ece-mes", "name": "Microprocessors & Embedded Systems Lab", "roomType": "Electronics Lab"},
+          {"id": "ece-sp", "name": "Signal Processing Lab", "roomType": "Electronics Lab"},
+          {"id": "ece-ae", "name": "Analog Electronics Lab", "roomType": "Electronics Lab"},
+          {"id": "ece-dsd", "name": "Digital System Design Lab", "roomType": "Electronics Lab"},
+          {"id": "ece-am", "name": "Antenna & Microwave Lab", "roomType": "Electronics Lab"},
+          {"id": "ece-comm", "name": "Communication Lab", "roomType": "Electronics Lab"}
+        ]},
+        { "id": "fe-labs", "name": "First Year (Applied Sciences) Labs", "rooms": [
+          {"id": "fe-workshop", "name": "Basic Workshop", "roomType": "Workshop"},
+          {"id": "fe-chem", "name": "Applied Chemistry Lab", "roomType": "Science Lab"},
+          {"id": "fe-phy", "name": "Applied Physics Lab", "roomType": "Science Lab"},
+          {"id": "fe-autocad", "name": "AutoCAD Lab", "roomType": "Computer Lab"},
+          {"id": "fe-mech", "name": "Engineering Mechanics Lab", "roomType": "Science Lab"},
+          {"id": "fe-spa", "name": "Structured Programming Lab", "roomType": "Computer Lab"},
+          {"id": "fe-bee", "name": "Basic Electrical Engineering Lab", "roomType": "Electronics Lab"},
+          {"id": "fe-lang1", "name": "Language Lab I", "roomType": "Computer Lab"},
+          {"id": "fe-lang2", "name": "Language Lab II", "roomType": "Computer Lab"}
+        ]},
+        { "id": "centres", "name": "Computer Centre & Research", "rooms": [
+          {"id": "computer-centre", "name": "Computer Centre", "roomType": "Computer Lab"},
+          {"id": "gait-lab", "name": "Gait Analysis Lab", "roomType": "Science Lab"}
+        ]},
+        { "id": "library", "name": "Library (1st Floor)", "rooms": [
+          {"id": "lib-reading", "name": "Library Reading Room", "roomType": "Library"},
+          {"id": "lib-reference", "name": "Library Reference Section", "roomType": "Library"},
+          {"id": "lib-computers", "name": "Library Computers / E-Resources", "roomType": "Library"}
+        ]},
+        { "id": "offices", "name": "Offices", "rooms": [
+          {"id": "general-office", "name": "General Office", "roomType": "Office"},
+          {"id": "director-office", "name": "Director's Office", "roomType": "Office"},
+          {"id": "principal-office", "name": "Principal's Office", "roomType": "Office"},
+          {"id": "conference-room", "name": "Conference Room", "roomType": "Office"},
+          {"id": "exam-cell", "name": "Exam Cell", "roomType": "Office"},
+          {"id": "tnp-cell", "name": "Training & Placement Cell", "roomType": "Office"},
+          {"id": "hod-cabins", "name": "HOD Cabins", "roomType": "Office"},
+          {"id": "nss-room", "name": "NSS Room", "roomType": "Office"}
+        ]},
+        { "id": "halls", "name": "Halls, Common Rooms & Canteen", "rooms": [
+          {"id": "seminar-hall", "name": "Seminar Hall", "roomType": "Seminar Hall"},
+          {"id": "boys-common", "name": "Boys' Common Room", "roomType": "Common Room"},
+          {"id": "girls-common", "name": "Girls' Common Room", "roomType": "Common Room"},
+          {"id": "indoor-games", "name": "Indoor Games (Carrom / Chess / TT)", "roomType": "Common Room"},
+          {"id": "canteen", "name": "Canteen", "roomType": "Canteen"}
+        ]},
+        { "id": "f0-common", "name": "Ground Floor — Corridor & Washrooms", "rooms": [
+          {"id": "f0-corridor", "name": "Corridor (Ground Floor)", "roomType": "Corridor"},
+          {"id": "f0-gents", "name": "Gents Toilet (Ground Floor)", "roomType": "Washroom"},
+          {"id": "f0-ladies", "name": "Ladies Toilet (Ground Floor)", "roomType": "Washroom"},
+          {"id": "f0-water", "name": "Water Purifier (Ground Floor)", "roomType": "Corridor"},
+          {"id": "f0-lift", "name": "Lift Lobby (Ground Floor)", "roomType": "Corridor"}
+        ]},
+        { "id": "f1-common", "name": "1st Floor — Corridor & Washrooms", "rooms": [
+          {"id": "f1-corridor", "name": "Corridor (1st Floor)", "roomType": "Corridor"},
+          {"id": "f1-gents", "name": "Gents Toilet (1st Floor)", "roomType": "Washroom"},
+          {"id": "f1-ladies", "name": "Ladies Toilet (1st Floor)", "roomType": "Washroom"},
+          {"id": "f1-water", "name": "Water Purifier (1st Floor)", "roomType": "Corridor"},
+          {"id": "f1-lift", "name": "Lift Lobby (1st Floor)", "roomType": "Corridor"}
+        ]},
+        { "id": "f2-common", "name": "2nd Floor — Corridor & Washrooms", "rooms": [
+          {"id": "f2-corridor", "name": "Corridor (2nd Floor)", "roomType": "Corridor"},
+          {"id": "f2-gents", "name": "Gents Toilet (2nd Floor)", "roomType": "Washroom"},
+          {"id": "f2-ladies", "name": "Ladies Toilet (2nd Floor)", "roomType": "Washroom"},
+          {"id": "f2-water", "name": "Water Purifier (2nd Floor)", "roomType": "Corridor"},
+          {"id": "f2-lift", "name": "Lift Lobby (2nd Floor)", "roomType": "Corridor"}
+        ]},
+        { "id": "f3-common", "name": "3rd Floor — Corridor & Washrooms", "rooms": [
+          {"id": "f3-corridor", "name": "Corridor (3rd Floor)", "roomType": "Corridor"},
+          {"id": "f3-gents", "name": "Gents Toilet (3rd Floor)", "roomType": "Washroom"},
+          {"id": "f3-ladies", "name": "Ladies Toilet (3rd Floor)", "roomType": "Washroom"},
+          {"id": "f3-water", "name": "Water Purifier (3rd Floor)", "roomType": "Corridor"},
+          {"id": "f3-lift", "name": "Lift Lobby (3rd Floor)", "roomType": "Corridor"}
+        ]}
+      ]
+    },
+    {
+      "id": "grounds", "name": "Campus Grounds",
+      "floors": [
+        { "id": "outdoor", "name": "Outdoor", "rooms": [
+          {"id": "main-gate", "name": "Main Entrance / Security Gate", "roomType": "Outdoor"},
+          {"id": "playground", "name": "Playground", "roomType": "Outdoor"},
+          {"id": "parking", "name": "Parking", "roomType": "Outdoor"},
+          {"id": "garden", "name": "Garden", "roomType": "Outdoor"},
+          {"id": "outdoor-other", "name": "Other outdoor area", "roomType": "Outdoor"}
+        ]}
+      ]
+    }
+  ]
+}
